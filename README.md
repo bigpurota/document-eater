@@ -60,6 +60,7 @@ The installer is resumable and idempotent. It:
 - downloads the pinned Qwen3.8 27B MLX 4-bit checkpoint (~16.05 GB);
 - downloads pinned BGE-M3 and `bge-reranker-v2-m3` retrieval models;
 - prefetches the isolated `mlx-lm==0.31.3` runtime;
+- installs `document-qwen`, `document-qwen-smoke`, and `document-opencode` commands;
 - runs the project test suite.
 
 It does not search for, read, copy, or upload private documents. A successful finish
@@ -72,15 +73,15 @@ test -f models/Qwen3.8-27B-4bit/config.json && echo "Qwen model: OK"
 tesseract --list-langs | grep -E '^(eng|rus)$'
 uv run --no-sync python -m pytest
 opencode --version
+command -v document-qwen document-qwen-smoke document-opencode
 ```
 
 ### 3. Start local Qwen
 
-Keep this first terminal open:
+Run this from any directory and keep the first terminal open:
 
 ```bash
-cd ~/Documents/document-eater
-zsh scripts/start-qwen-macos.sh
+document-qwen
 ```
 
 The server listens only on `127.0.0.1:8080`. Initial model loading can take a while.
@@ -92,11 +93,10 @@ curl -fsS http://127.0.0.1:8080/v1/models
 
 ### 4. Verify agent tool calling
 
-In the second terminal:
+In the second terminal, also from any directory:
 
 ```bash
-cd ~/Documents/document-eater
-uv run --no-sync python scripts/smoke-mlx-tools.py
+document-qwen-smoke
 ```
 
 Continue only after it prints:
@@ -124,23 +124,24 @@ to access the selected folders under **System Settings → Privacy & Security**.
 
 ### 6. Start OpenCode and run the first audit
 
-Always launch OpenCode from the repository so it loads the checked-in
-`opencode.json` and MCP server:
+Change into the folder that contains the PDFs and launch the installed document
+profile there:
 
 ```bash
-cd ~/Documents/document-eater
-opencode
+cd ~/Documents/PrivateDocuments/project-1
+document-opencode
 ```
 
-Confirm that the selected model is `local-docs/qwen-27b`, then send a prompt with
-absolute input and output paths:
+`document-opencode` loads a generated OpenCode configuration containing the absolute
+application path. The MCP process uses the current document folder as its working
+directory, so `.` and relative output paths refer to this folder rather than the code
+repository.
+
+Confirm that the selected model is `local-docs/qwen-27b`, then send:
 
 ```text
-Use the document-eater tools to audit every PDF under
-/Users/YOUR_NAME/Documents/PrivateDocuments/project-1.
-
-Store generated artifacts under
-/Users/YOUR_NAME/Documents/DocumentAudits/project-1.
+Use the document-eater tools to audit every PDF in the current workspace (.).
+Store generated artifacts under ./audit-run.
 
 Use local Qwen verification. Extract requirements, obligations, deadlines,
 required documents, exceptions, and conflicting clauses. For every result use
@@ -157,7 +158,7 @@ verification, and return a summary plus an absolute `report_path`.
 Open the path returned by the agent, normally:
 
 ```bash
-open /Users/YOUR_NAME/Documents/DocumentAudits/project-1/report.html
+open ~/Documents/PrivateDocuments/project-1/audit-run/report.html
 ```
 
 The output directory contains:
@@ -211,8 +212,9 @@ git pull --ff-only
 zsh scripts/bootstrap-m3-max.sh
 ```
 
-Existing private documents and audit directories outside the repository are not
-touched.
+This refreshes the absolute application path stored in the generated OpenCode profile
+and reinstalls the three launcher commands. Existing private documents and audit
+directories outside the repository are not touched.
 
 ### Troubleshooting
 
@@ -222,7 +224,8 @@ touched.
 | Port 8080 is unavailable | Stop the old model server with `Ctrl+C`; do not expose a replacement on `0.0.0.0`. |
 | `Local Qwen endpoint is unavailable` | Start `scripts/start-qwen-macos.sh` and verify `/v1/models`. |
 | MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
-| OpenCode cannot see document tools | Start it from the repository and run `uv run --no-sync document-eater-mcp` once to inspect startup errors. |
+| `document-opencode` is not found | Rerun the bootstrap; it installs launchers into the Homebrew `bin` directory. |
+| OpenCode cannot see document tools | Rerun the bootstrap, then start with `document-opencode` instead of plain `opencode`. |
 | macOS denies access to PDFs or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
 | Memory pressure becomes high | Close other large applications, restart the MLX server, and keep the configured 8k context/4 GB prompt-cache limits. |
 | Report contains only `UNKNOWN` | Confirm that model verification was requested; otherwise this is the intentional candidate-only behavior. |
@@ -306,13 +309,21 @@ data owner explicitly permits third-party processing.
 
 ## OpenCode integration details
 
-The checked-in `opencode.json` is for the current OpenCode V2 configuration. It:
+The checked-in `opencode.json` is the source template for the current OpenCode V2
+configuration. During bootstrap, an absolute-path copy is written to
+`~/.config/opencode/document-eater.json`. The `document-opencode` launcher selects
+that copy through `OPENCODE_CONFIG`. It:
 
 - selects the local MLX Qwen endpoint as the OpenCode model;
 - starts `document-eater-mcp` over stdio;
 - exposes `audit_documents`, `prepare_corpus`, `search_corpus`,
   `list_audit_items`, `get_audit_summary`, `read_document_page`, and
   `graph_neighbors` directly to the model.
+
+The generated MCP command selects the application environment with `uv --project`
+while leaving MCP `cwd` as the OpenCode workspace. This is what allows code and model
+files to stay under `~/Documents/document-eater` while OpenCode is launched from any
+unrelated document folder.
 
 Do not switch OpenCode to a cloud model for this task: MCP returns extracted document
 text to the controlling model. A cloud OpenCode model therefore breaks the local-only

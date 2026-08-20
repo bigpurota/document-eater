@@ -26,6 +26,20 @@ The fallback is never triggered by phrases such as "insufficient evidence" or by
 failed citation check. Automatic refusal classification is disabled until a held-out
 set can distinguish policy refusal from correct uncertainty and data-quality errors.
 
+## OpenCode workspace boundary
+
+Application code and document workspaces are deliberately independent. Bootstrap
+generates a custom OpenCode configuration with an absolute application path and
+installs the `document-opencode` launcher. Its MCP command uses
+`uv run --project <application-root>` to select the locked Python environment while
+leaving MCP `cwd` equal to the OpenCode workspace. Therefore relative document and
+output paths resolve from the folder in which `document-opencode` was launched, not
+from this source repository.
+
+The generated configuration is stored separately from the user's ordinary global
+OpenCode configuration and selected through `OPENCODE_CONFIG`; bootstrap does not
+overwrite unrelated providers or preferences.
+
 ## Graph layers
 
 The graph is deliberately split into evidence levels:
