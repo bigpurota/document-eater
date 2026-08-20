@@ -13,12 +13,232 @@ multilingual retrieval profile, an OpenCode MCP agent interface, and a localhost
 Qwen client. Retrieval keeps its component scores visible so BM25, BGE-M3 dense,
 learned-sparse, fusion, and reranking can be evaluated independently.
 
+## End-to-end: fresh M3 Max to first document audit
+
+This is the supported path for an **Apple M3 Max with 36 GB unified memory**. Keep at
+least 40 GiB free; 50 GiB or more is recommended for the Python environment, Qwen,
+the retrieval models, and working artifacts. Source PDFs may live anywhere on the
+Mac and are never required to be inside this repository.
+
+### 1. Prepare the Mac and clone the private repository
+
+The Mac needs Homebrew and Xcode Command Line Tools. Verify them:
+
+```bash
+xcode-select -p
+brew --version
+```
+
+If `xcode-select` fails, run `xcode-select --install`. To clone with GitHub CLI:
+
+```bash
+brew install gh
+gh auth login
+cd ~/Documents
+gh repo clone bigpurota/document-eater
+cd document-eater
+```
+
+Alternatively, download the repository ZIP while signed into GitHub, unpack it, and
+open Terminal in the unpacked `document-eater` folder.
+
+### 2. Run the complete installer
+
+From Terminal:
+
+```bash
+zsh scripts/bootstrap-m3-max.sh
+```
+
+Or double-click `INSTALL-M3-MAX.command` in Finder. If Gatekeeper blocks it,
+Control-click the file, choose **Open**, and confirm once.
+
+The installer is resumable and idempotent. It:
+
+- installs missing `uv`, Tesseract, Russian OCR data, and OpenCode through Homebrew;
+- installs Python 3.12 and the locked project environment;
+- downloads the pinned Qwen3.8 27B MLX 4-bit checkpoint (~16.05 GB);
+- downloads pinned BGE-M3 and `bge-reranker-v2-m3` retrieval models;
+- prefetches the isolated `mlx-lm==0.31.3` runtime;
+- runs the project test suite.
+
+It does not search for, read, copy, or upload private documents. A successful finish
+ends with `Bootstrap complete` and a passing test summary.
+
+Optional installation checks:
+
+```bash
+test -f models/Qwen3.8-27B-4bit/config.json && echo "Qwen model: OK"
+tesseract --list-langs | grep -E '^(eng|rus)$'
+uv run --no-sync python -m pytest
+opencode --version
+```
+
+### 3. Start local Qwen
+
+Keep this first terminal open:
+
+```bash
+cd ~/Documents/document-eater
+zsh scripts/start-qwen-macos.sh
+```
+
+The server listens only on `127.0.0.1:8080`. Initial model loading can take a while.
+After it starts, this request must succeed from a second terminal:
+
+```bash
+curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+### 4. Verify agent tool calling
+
+In the second terminal:
+
+```bash
+cd ~/Documents/document-eater
+uv run --no-sync python scripts/smoke-mlx-tools.py
+```
+
+Continue only after it prints:
+
+```text
+MLX tool-call smoke test PASSED
+```
+
+This is a required gate: a server that generates normal text but fails this test
+cannot reliably drive the OpenCode/MCP agent loop.
+
+### 5. Keep documents outside the code repository
+
+For example:
+
+```text
+~/Documents/PrivateDocuments/project-1/    # source PDFs
+~/Documents/DocumentAudits/project-1/      # generated audit data
+~/Documents/document-eater/                # application code and local models
+```
+
+Directories on an encrypted external SSD work as well, for example
+`/Volumes/PrivateSSD/Documents/project-1`. Terminal and OpenCode must have permission
+to access the selected folders under **System Settings → Privacy & Security**.
+
+### 6. Start OpenCode and run the first audit
+
+Always launch OpenCode from the repository so it loads the checked-in
+`opencode.json` and MCP server:
+
+```bash
+cd ~/Documents/document-eater
+opencode
+```
+
+Confirm that the selected model is `local-docs/qwen-27b`, then send a prompt with
+absolute input and output paths:
+
+```text
+Use the document-eater tools to audit every PDF under
+/Users/YOUR_NAME/Documents/PrivateDocuments/project-1.
+
+Store generated artifacts under
+/Users/YOUR_NAME/Documents/DocumentAudits/project-1.
+
+Use local Qwen verification. Extract requirements, obligations, deadlines,
+required documents, exceptions, and conflicting clauses. For every result use
+PASS, PARTIAL, FAIL, UNKNOWN, CONFLICT, or NOT_APPLICABLE. Never convert missing
+evidence into FAIL. Show FAIL, CONFLICT, and UNKNOWN first and cite exact source
+documents and pages. Return the absolute report path when finished.
+```
+
+OpenCode should call `audit_documents`, wait for OCR/indexing/retrieval/model
+verification, and return a summary plus an absolute `report_path`.
+
+### 7. Inspect and continue working with the corpus
+
+Open the path returned by the agent, normally:
+
+```bash
+open /Users/YOUR_NAME/Documents/DocumentAudits/project-1/report.html
+```
+
+The output directory contains:
+
+| File | Purpose |
+|---|---|
+| `report.html` | human-readable requirement audit |
+| `requirements.csv` | sortable/exportable requirement table |
+| `audit.json` | complete machine-readable results and citations |
+| `run-manifest.json` | input, model, retrieval mode, and artifact provenance |
+| `index.sqlite3` | local lexical/dense/sparse retrieval index |
+| `artifacts/<run-id>/` | extracted pages, blocks, bounding boxes, and graphs |
+
+Follow-up prompts reuse those artifacts. Examples:
+
+```text
+Show every UNKNOWN item and explain which evidence is missing.
+```
+
+```text
+Find all requirements concerning final payment and show the original pages.
+```
+
+```text
+Check whether the main agreement and its appendices contain conflicting deadlines.
+```
+
+### CLI-only end-to-end alternative
+
+With the Qwen terminal still running:
+
+```bash
+cd ~/Documents/document-eater
+uv run --no-sync document-eater audit \
+  /Users/YOUR_NAME/Documents/PrivateDocuments/project-1 \
+  --output /Users/YOUR_NAME/Documents/DocumentAudits/project-1 \
+  --use-llm
+open /Users/YOUR_NAME/Documents/DocumentAudits/project-1/report.html
+```
+
+Omit `--use-llm` for extraction, requirement candidates, and retrieval without model
+verification. In that mode, unresolved verdicts deliberately remain `UNKNOWN`.
+
+### Updating an installed copy
+
+Stop OpenCode and the MLX server, then run:
+
+```bash
+cd ~/Documents/document-eater
+git pull --ff-only
+zsh scripts/bootstrap-m3-max.sh
+```
+
+Existing private documents and audit directories outside the repository are not
+touched.
+
+### Troubleshooting
+
+| Symptom | Action |
+|---|---|
+| `rus` is absent from `tesseract --list-langs` | Run `brew install tesseract-lang`, then retry. |
+| Port 8080 is unavailable | Stop the old model server with `Ctrl+C`; do not expose a replacement on `0.0.0.0`. |
+| `Local Qwen endpoint is unavailable` | Start `scripts/start-qwen-macos.sh` and verify `/v1/models`. |
+| MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
+| OpenCode cannot see document tools | Start it from the repository and run `uv run --no-sync document-eater-mcp` once to inspect startup errors. |
+| macOS denies access to PDFs or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
+| Memory pressure becomes high | Close other large applications, restart the MLX server, and keep the configured 8k context/4 GB prompt-cache limits. |
+| Report contains only `UNKNOWN` | Confirm that model verification was requested; otherwise this is the intentional candidate-only behavior. |
+
+If the MLX server or smoke test fails, do not automatically switch to a cloud model:
+that would change the privacy boundary for every document fragment returned to the
+agent.
+
 ## Privacy boundary
 
-- Source PDFs, extracted artifacts, embeddings, and graph data stay under local
-  `data/`, `artifacts/`, and `models/` directories, all ignored by git.
-- The remote LLM adapter accepts localhost endpoints and is intended for an SSH tunnel. It
-  will send retrieved blocks, not full documents.
+- Source PDFs stay at the path you choose. Extracted artifacts, embeddings, and graph
+  data stay in the selected local output directory or the ignored `data/`,
+  `artifacts/`, and `models/` defaults.
+- The LLM adapter accepts loopback endpoints. The primary MLX server is local; an
+  optional remote server must be reached through an SSH tunnel and receives only
+  retrieved evidence blocks rather than entire PDFs.
 - A Vast.ai instance is still a third-party processor. Use it only when the data
   owner's policy permits external processing. Encryption in transit does not make
   a third party equivalent to local execution.
@@ -38,8 +258,9 @@ not an automatic replacement.
 | Vast primary reference | official BF16 | ~56 GB | 80 GB GPU, evaluation/reference runs |
 | Vast manual fallback | OBLITERATUS Q4_K_M | 16.81 GB file | separate 24 GB profile, loaded only when requested |
 
-The published 262k context length is not a single-GPU operating target. RAG will use
-a small, explicit evidence budget; the initial Vast Q4 profile starts at 8k context.
+The published 262k context length is not the operating target for this laptop. RAG
+uses a small, explicit evidence budget; the initial local MLX profile starts at 8k
+context.
 Community abliterated checkpoints are untrusted supply-chain inputs until hashes,
 lineage, license, and a small document QA evaluation are recorded.
 
@@ -59,98 +280,31 @@ use must be checked against the data owner's software policy; before proprietary
 distribution, buy an appropriate license or replace this adapter with a permissive
 PDF backend.
 
-## Try it now (Qwen is optional)
+## Retrieval and runtime profiles
 
-Requirements: Python 3.12+, `uv`, and Tesseract with `rus` and `eng` language data.
-
-```bash
-uv sync --extra quality --no-editable --reinstall-package document-eater
-uv run --no-sync document-eater audit /path/to/pdf-folder --output audit-run
-open audit-run/report.html
-```
-
-This first command is deliberately useful without an LLM: it performs native-text
-extraction/OCR, finds explicit requirement candidates, retrieves possible evidence,
-and writes `report.html`, `requirements.csv`, `audit.json`, and a run manifest. All
-verdicts remain `UNKNOWN` until Qwen checks the evidence. Missing evidence is never
-silently converted into `FAIL`.
-
-The explicit non-editable reinstall works around a macOS/Python issue where `.pth`
-files under a folder marked hidden can be skipped. Subsequent `--no-sync` commands use
-that exact installed build and do not silently remove the `quality` extra.
-
-The default retrieval profile is:
+The default quality retriever is fully local:
 
 ```text
 BM25 + BGE-M3 dense + BGE-M3 learned sparse -> RRF -> bge-reranker-v2-m3
 ```
 
-Both BGE models are local and pinned to exact Hugging Face revisions. The first run
-downloads their weights. `--retrieval hybrid` selects the lighter
-`BM25 + multilingual-e5-large` profile; `--retrieval lexical` is the BM25 control.
+Both BGE models are pinned to exact Hugging Face revisions. `--retrieval hybrid`
+selects the lighter `BM25 + multilingual-e5-large` profile; `--retrieval lexical`
+is the BM25 control.
 
-## Local Qwen setup on an M3 Max 36 GB
+The Qwen launcher binds only to `127.0.0.1`, disables thinking, and caps the
+persistent prompt-cache pool at 4 GB. OpenCode separately caps requests at 8192
+tokens. `mlx-lm==0.31.3` runs in an isolated `uvx` environment because that runtime
+requires Transformers 5 while the local BGE reranker is deliberately pinned to
+Transformers 4.x.
 
-For a new Mac that already has Homebrew and Xcode Command Line Tools, the complete
-bootstrap can be started by double-clicking `INSTALL-M3-MAX.command` in Finder, or
-with one terminal command:
-
-```bash
-cd /path/to/document_eater
-zsh scripts/bootstrap-m3-max.sh
-```
-
-It installs missing `uv`, Tesseract language data, and OpenCode; creates the pinned
-Python environment; downloads the pinned Qwen MLX weights, BGE-M3, and the reranker;
-prefetches the isolated MLX runtime; and runs the tests. Downloads are resumable. It
-does not inspect, copy, or move private documents. Expect more than 20 GB of model
-downloads and keep at least 40 GiB of free disk space.
-
-The equivalent manual setup is below.
-
-Install OCR and download the pinned MLX 4-bit model (16.05 GB of weight shards):
-
-```bash
-brew install tesseract tesseract-lang
-uv sync --extra quality --no-editable \
-  --reinstall-package document-eater
-HF_HUB_DISABLE_TELEMETRY=1 uvx --from huggingface-hub hf download \
-  mlx-community/Qwen3.8-27B-4bit \
-  --revision 3e6447f082e89cc7f0bc6e5441afd38dfce760ff \
-  --local-dir models/Qwen3.8-27B-4bit
-zsh scripts/start-qwen-macos.sh
-```
-
-Keep that terminal open. In a second terminal, first verify the exact capability
-that OpenCode needs:
-
-```bash
-uv run --no-sync python scripts/smoke-mlx-tools.py
-```
-
-Only a `PASSED` result establishes that this checkpoint/runtime pair is returning
-OpenAI-shaped tool calls. Then run a document audit:
-
-```bash
-uv run --no-sync document-eater audit /path/to/pdf-folder \
-  --output audit-run --use-llm
-open audit-run/report.html
-```
-
-The launcher binds only to `127.0.0.1`, disables thinking, and caps the persistent
-prompt-cache pool at 4 GB. OpenCode separately caps requests at 8192 tokens. This is
-an initial operating profile, not a measured throughput or memory optimum on your
-exact M3 Max. It launches `mlx-lm==0.31.3` in an isolated `uvx` environment because
-that runtime requires Transformers 5 while the local BGE reranker is deliberately
-pinned to Transformers 4.x.
-
-The abliterated fallback remains a separate llama.cpp/GGUF path via
-`scripts/start-qwen-gguf-fallback.sh`; pass `--profile abliterated` to the audit CLI.
-It is never selected automatically. The Vast profiles remain in
+The abliterated fallback remains a separate llama.cpp/GGUF path through
+`scripts/start-qwen-gguf-fallback.sh`; pass `--profile abliterated` to the CLI when
+using that server. It is never selected automatically. Vast profiles remain in
 `config/model-profiles.toml` for cases where local latency is unacceptable and the
-data owner allows third-party processing.
+data owner explicitly permits third-party processing.
 
-## Use it as an agent from OpenCode
+## OpenCode integration details
 
 The checked-in `opencode.json` is for the current OpenCode V2 configuration. It:
 
@@ -159,14 +313,6 @@ The checked-in `opencode.json` is for the current OpenCode V2 configuration. It:
 - exposes `audit_documents`, `prepare_corpus`, `search_corpus`,
   `list_audit_items`, `get_audit_summary`, `read_document_page`, and
   `graph_neighbors` directly to the model.
-
-Start Qwen, pass the tool-call smoke test, then run `opencode` from this repository
-and ask:
-
-```text
-Use document-eater to audit /absolute/path/to/my/pdfs with local Qwen.
-Show UNKNOWN and CONFLICT first, and cite the source pages.
-```
 
 Do not switch OpenCode to a cloud model for this task: MCP returns extracted document
 text to the controlling model. A cloud OpenCode model therefore breaks the local-only
