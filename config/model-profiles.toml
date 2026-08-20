@@ -1,0 +1,88 @@
+[qwen38_local_m3max_mlx4]
+role = "primary"
+base_model_id = "Qwen/Qwen3.8-27B"
+model_id = "mlx-community/Qwen3.8-27B-4bit"
+revision = "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
+artifact = "models/Qwen3.8-27B-4bit"
+runtime = "mlx-lm"
+runtime_version = "0.31.3"
+context_tokens = 8192
+weight_bytes = 16054541349
+target_hardware = "Apple M3 Max, 36 GB unified memory"
+bind_host = "127.0.0.1"
+access = "local_only"
+temperature = 0.1
+top_p = 0.8
+top_k = 20
+presence_penalty = 1.5
+repetition_penalty = 1.0
+enable_thinking = false
+prompt_cache_bytes = 4000000000
+status = "primary_candidate_requires_target_mac_benchmark"
+
+[qwen38_base_vast_q4]
+role = "remote_fallback"
+base_model_id = "Qwen/Qwen3.8-27B"
+model_id = "unsloth/Qwen3.8-27B-GGUF"
+revision = "4ca720788d1e01f1bff70c033e0d0028fd02e502"
+artifact = "Qwen3.8-27B-UD-Q4_K_M.gguf"
+runtime = "llama.cpp"
+context_tokens = 8192
+weight_bytes = 16464440224
+minimum_gpu_vram_gb = 24
+bind_host = "127.0.0.1"
+access = "ssh_tunnel_only"
+temperature = 0.7
+top_p = 0.8
+top_k = 20
+presence_penalty = 1.5
+repetition_penalty = 1.0
+enable_thinking = false
+status = "primary_candidate_unbenchmarked"
+
+[qwen38_base_vast_bf16]
+role = "primary_reference"
+model_id = "Qwen/Qwen3.8-27B"
+revision = "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
+artifact = "safetensors_bf16"
+runtime = "vllm"
+context_tokens = 32768
+minimum_gpu_vram_gb = 80
+language_model_only = true
+bind_host = "127.0.0.1"
+access = "ssh_tunnel_only"
+temperature = 0.7
+top_p = 0.8
+top_k = 20
+presence_penalty = 1.5
+repetition_penalty = 1.0
+enable_thinking = false
+status = "primary_reference_unbenchmarked"
+
+[qwen38_abliterated_fallback_q4]
+role = "manual_fallback"
+model_id = "OBLITERATUS/Qwen3.8-27B-OBLITERATED"
+revision = "46c3c40faf9d89c692d8e82514cb5fe3d0f7fa83"
+artifact = "Qwen3.8-27B-OBLITERATED-Q4_K_M.gguf"
+runtime = "llama.cpp"
+context_tokens = 8192
+weight_bytes = 16810714400
+minimum_gpu_vram_gb = 24
+bind_host = "127.0.0.1"
+access = "ssh_tunnel_only"
+temperature = 0.0
+repetition_penalty = 1.15
+enable_thinking = false
+system_prompt = "empty"
+status = "fallback_candidate_unbenchmarked"
+
+[qwen38_local_16gb]
+role = "unsupported_emergency_only"
+base_model_id = "Qwen/Qwen3.8-27B"
+model_id = "unsloth/Qwen3.8-27B-GGUF"
+revision = "4ca720788d1e01f1bff70c033e0d0028fd02e502"
+artifact = "Qwen3.8-27B-UD-IQ4_XS.gguf"
+runtime = "llama.cpp"
+context_tokens = 2048
+weight_bytes = 14252845984
+status = "not_recommended_16gb_has_insufficient_headroom"

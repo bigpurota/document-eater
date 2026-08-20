@@ -1,0 +1,17 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+
+# Local/private data must never enter git.
+data/
+artifacts/
+audit-run/
+models/
+*.pdf
+*.gguf
