@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .artifacts import source_hash
 from .index import SearchHit, format_hit_location, index_artifacts, search
-from .ingest import discover_documents, document_counts, ingest_document
+from .ingest import WORKSPACE_MARKER, discover_documents, document_counts, ingest_document
 from .llm import QwenClient, build_evidence
 from .rag import (
     DEFAULT_EMBEDDING_MODEL,
@@ -101,9 +102,45 @@ class AuditReport:
     retrieval_mode: Literal["quality", "hybrid", "lexical"]
     summary: dict[str, int]
     items: list[AuditItem]
+    reused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _corpus_fingerprint(documents: list[Path], source: Path) -> str:
+    entries = []
+    for document in documents:
+        label = str(document.relative_to(source)) if source.is_dir() else document.name
+        entries.append({"path": label, "sha256": source_hash(document)})
+    encoded = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _load_cached_report(path: Path) -> AuditReport:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    items = [
+        AuditItem(
+            requirement=Requirement(**item["requirement"]),
+            status=item["status"],
+            rationale=item["rationale"],
+            used_citations=item.get("used_citations", []),
+            retrieved_evidence=item.get("retrieved_evidence", []),
+            model=item.get("model"),
+        )
+        for item in payload.get("items", [])
+    ]
+    return AuditReport(
+        schema_version=int(payload["schema_version"]),
+        created_at=str(payload["created_at"]),
+        input_path=str(payload["input_path"]),
+        run_directory=str(payload["run_directory"]),
+        verification_mode=payload["verification_mode"],
+        retrieval_mode=payload["retrieval_mode"],
+        summary={key: int(value) for key, value in payload.get("summary", {}).items()},
+        items=items,
+        reused=True,
+    )
 
 
 def _manifest_by_document(artifacts: Path) -> dict[str, dict[str, Any]]:
@@ -350,18 +387,62 @@ def audit_corpus(
     retrieval_mode: Literal["quality", "hybrid", "lexical"] = "quality",
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_cache: str | Path = DEFAULT_MODEL_CACHE,
+    force_rebuild: bool = False,
 ) -> AuditReport:
     notify = progress or (lambda _message: None)
     source = Path(input_path).expanduser().resolve()
     run = Path(run_directory).expanduser().resolve()
+    if source == run or source.is_relative_to(run):
+        raise ValueError(
+            "The workspace must not be the input directory or one of its parents. "
+            "Use a child such as .document-eater-workspace or a separate directory."
+        )
     started = datetime.now(UTC)
     run_id = started.strftime("%Y%m%dT%H%M%S.%fZ")
     artifacts = run / "artifacts" / run_id
     database = run / "index.sqlite3"
-    run.mkdir(parents=True, exist_ok=True)
-    documents = discover_documents(source)
+    documents = discover_documents(source, exclude_paths=(run,))
     if not documents:
         raise ValueError(f"No supported documents found under: {source}")
+    fingerprint = _corpus_fingerprint(documents, source)
+    verification_mode = "qwen" if client else "candidate_only"
+    audit_profile = {
+        "ocr": ocr,
+        "languages": languages,
+        "dpi": dpi,
+        "evidence_limit": evidence_limit,
+        "verification_mode": verification_mode,
+        "retrieval_mode": retrieval_mode,
+        "embedding_model": embedding_model if retrieval_mode == "hybrid" else None,
+        "model": client.model if client else None,
+    }
+    manifest_path = run / "run-manifest.json"
+    audit_path = run / "audit.json"
+    if (
+        not force_rebuild
+        and manifest_path.is_file()
+        and audit_path.is_file()
+        and database.is_file()
+    ):
+        try:
+            previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+            artifact_directory = Path(previous["artifact_directory"])
+            if (
+                previous.get("input_path") == str(source)
+                and previous.get("corpus_fingerprint") == fingerprint
+                and previous.get("audit_profile") == audit_profile
+                and artifact_directory.is_dir()
+            ):
+                notify("Корпус не изменился: использован готовый локальный индекс и аудит")
+                return _load_cached_report(audit_path)
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            # An incomplete or old workspace is safe to replace from the source documents.
+            pass
+    run.mkdir(parents=True, exist_ok=True)
+    (run / WORKSPACE_MARKER).write_text(
+        "Generated locally by Document Eater. Do not add this directory to the source corpus.\n",
+        encoding="utf-8",
+    )
     counts = document_counts(documents)
     summary_counts = ", ".join(
         f"{kind.upper()}: {count}" for kind, count in counts.items() if count
@@ -419,7 +500,7 @@ def audit_corpus(
         created_at=started.isoformat(),
         input_path=str(source),
         run_directory=str(run),
-        verification_mode="qwen" if client else "candidate_only",
+        verification_mode=verification_mode,
         retrieval_mode=retrieval_mode,
         summary=summary,
         items=items,
@@ -440,6 +521,8 @@ def audit_corpus(
         "verification_mode": report.verification_mode,
         "retrieval_mode": report.retrieval_mode,
         "model": client.model if client else None,
+        "corpus_fingerprint": fingerprint,
+        "audit_profile": audit_profile,
         "artifact_directory": str(artifacts),
         "artifacts": ["audit.json", "requirements.csv", "report.html", "index.sqlite3"],
     }

@@ -39,6 +39,9 @@ def build_workspace_config(project_root: Path) -> dict[str, Any]:
     # from which document-opencode was launched, not the application source tree.
     server["cwd"] = "."
     server["enabled"] = True
+    environment = dict(server.get("environment", {}))
+    environment["DOCUMENT_EATER_MODEL_CACHE"] = str(root / "models" / "retrieval")
+    server["environment"] = environment
     server.pop("codemode", None)
     config["mcp"] = {"document-eater": server}
     return config

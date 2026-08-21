@@ -77,7 +77,12 @@ def _parser() -> argparse.ArgumentParser:
         "audit", help="ingest a document folder and build a requirement compliance report"
     )
     audit_cmd.add_argument("input", type=Path, help="supported document or directory")
-    audit_cmd.add_argument("--output", type=Path, default=Path("audit-run"))
+    audit_cmd.add_argument("--output", type=Path, default=Path(".document-eater-workspace"))
+    audit_cmd.add_argument(
+        "--force-rebuild",
+        action="store_true",
+        help="ignore an unchanged cached audit and rebuild every artifact",
+    )
     audit_cmd.add_argument("--use-llm", action="store_true", help="verify with local Qwen")
     audit_cmd.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
     audit_cmd.add_argument("--profile", choices=("base", "abliterated"), default="base")
@@ -175,6 +180,7 @@ def main() -> None:
             retrieval_mode=args.retrieval,
             embedding_model=args.embedding_model,
             embedding_cache=args.embedding_cache,
+            force_rebuild=args.force_rebuild,
         )
         result = {
             "verification_mode": report.verification_mode,

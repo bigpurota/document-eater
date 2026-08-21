@@ -22,6 +22,14 @@ def test_checked_in_template_uses_supported_opencode_shape():
     server = config["mcp"]["document-eater"]
     assert server["enabled"] is True
     assert "codemode" not in server
+    assert config["default_agent"] == "document-auditor"
+    agent = config["agent"]["document-auditor"]
+    assert agent["mode"] == "primary"
+    assert agent["steps"] == 12
+    assert "Never emit routine progress" in agent["prompt"]
+    assert "Never repeat a tool call" in agent["prompt"]
+    assert agent["permission"]["*"] == "deny"
+    assert agent["permission"]["document_eater_*"] == "allow"
 
 
 def test_workspace_launchers_use_application_project_but_document_cwd(tmp_path):
@@ -62,6 +70,9 @@ def test_workspace_launchers_use_application_project_but_document_cwd(tmp_path):
         "--no-sync",
         "document-eater-mcp",
     ]
+    assert server["environment"]["DOCUMENT_EATER_MODEL_CACHE"] == str(
+        project.resolve() / "models" / "retrieval"
+    )
     assert installed["document-opencode"] == str(bin_dir / "document-opencode")
     launcher = (bin_dir / "document-opencode").read_text()
     assert "OPENCODE_CONFIG=" in launcher

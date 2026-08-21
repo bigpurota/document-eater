@@ -37,6 +37,8 @@ mcp = MCPServer(
     ),
 )
 _retrievers: dict[tuple[str, str, str], HybridRetriever] = {}
+DEFAULT_WORKSPACE = ".document-eater-workspace"
+DEFAULT_EMBEDDING_CACHE = os.environ.get("DOCUMENT_EATER_MODEL_CACHE", "models/retrieval")
 
 
 def _release_retrieval_memory() -> None:
@@ -107,15 +109,16 @@ def _client(profile: str, base_url: str | None) -> QwenClient:
 @mcp.tool()
 def audit_documents(
     input_path: str,
-    output_path: str = "audit-run",
+    output_path: str = DEFAULT_WORKSPACE,
     use_qwen: bool = False,
     profile: str = "base",
     qwen_base_url: str | None = None,
     retrieval_mode: str = "quality",
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
-    embedding_cache: str = "models/retrieval",
+    embedding_cache: str = DEFAULT_EMBEDDING_CACHE,
+    force_rebuild: bool = False,
 ) -> dict[str, Any]:
-    """Audit a document or directory: ingest, find requirements, retrieve evidence, write reports."""
+    """Audit once or reuse an unchanged corpus; set force_rebuild only when explicitly requested."""
     _release_retrieval_memory()
     try:
         report = audit_corpus(
@@ -125,6 +128,7 @@ def audit_documents(
             retrieval_mode=retrieval_mode,  # type: ignore[arg-type]
             embedding_model=embedding_model,
             embedding_cache=embedding_cache,
+            force_rebuild=force_rebuild,
         )
     finally:
         _release_retrieval_memory()
@@ -133,6 +137,7 @@ def audit_documents(
         "retrieval_mode": report.retrieval_mode,
         "summary": report.summary,
         "requirements": len(report.items),
+        "reused": report.reused,
         "report_path": str(Path(report.run_directory) / "report.html"),
         "audit_path": str(Path(report.run_directory) / "audit.json"),
     }
@@ -141,9 +146,10 @@ def audit_documents(
 @mcp.tool()
 def prepare_corpus(
     input_path: str,
-    workspace: str = "audit-run",
+    workspace: str = DEFAULT_WORKSPACE,
     retrieval_mode: str = "quality",
-    embedding_cache: str = "models/retrieval",
+    embedding_cache: str = DEFAULT_EMBEDDING_CACHE,
+    force_rebuild: bool = False,
 ) -> dict[str, Any]:
     """Extract and index a private document corpus locally for subsequent search."""
     _release_retrieval_memory()
@@ -154,6 +160,7 @@ def prepare_corpus(
             client=None,
             retrieval_mode=retrieval_mode,  # type: ignore[arg-type]
             embedding_cache=embedding_cache,
+            force_rebuild=force_rebuild,
         )
     finally:
         _release_retrieval_memory()
@@ -163,6 +170,7 @@ def prepare_corpus(
         "database_path": str(Path(report.run_directory).resolve() / "index.sqlite3"),
         "retrieval_mode": report.retrieval_mode,
         "requirement_candidates": len(report.items),
+        "reused": report.reused,
         "candidate_report": str(Path(report.run_directory).resolve() / "report.html"),
     }
 
@@ -170,11 +178,11 @@ def prepare_corpus(
 @mcp.tool()
 def search_corpus(
     query: str,
-    database_path: str = "audit-run/index.sqlite3",
+    database_path: str = f"{DEFAULT_WORKSPACE}/index.sqlite3",
     limit: int = 10,
     mode: str = "quality",
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
-    embedding_cache: str = "models/retrieval",
+    embedding_cache: str = DEFAULT_EMBEDDING_CACHE,
 ) -> list[dict[str, Any]]:
     """Search the local document index and return page/block provenance with each result."""
     database_path = str(_resolve_run_file(database_path, "index.sqlite3"))
@@ -191,7 +199,7 @@ def search_corpus(
 
 @mcp.tool()
 def list_audit_items(
-    audit_path: str = "audit-run/audit.json", status: str | None = None
+    audit_path: str = f"{DEFAULT_WORKSPACE}/audit.json", status: str | None = None
 ) -> list[dict[str, Any]]:
     """Read requirement results from an existing audit, optionally filtered by status."""
     path = _resolve_run_file(audit_path, "audit.json")
@@ -204,7 +212,9 @@ def list_audit_items(
 
 
 @mcp.tool()
-def get_audit_summary(audit_path: str = "audit-run/audit.json") -> dict[str, Any]:
+def get_audit_summary(
+    audit_path: str = f"{DEFAULT_WORKSPACE}/audit.json",
+) -> dict[str, Any]:
     """Return the compact summary and report location for a completed audit."""
     path = _resolve_run_file(audit_path, "audit.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -221,7 +231,7 @@ def get_audit_summary(audit_path: str = "audit-run/audit.json") -> dict[str, Any
 def read_document_page(
     document_id: str,
     page: int,
-    artifacts_root: str = "audit-run/artifacts",
+    artifacts_root: str = f"{DEFAULT_WORKSPACE}/artifacts",
 ) -> dict[str, Any]:
     """Open an extracted page, Word document unit, or Excel sheet with provenance."""
     if page < 1:
@@ -253,7 +263,7 @@ def read_document_page(
 @mcp.tool()
 def graph_neighbors(
     node_id: str,
-    artifacts_root: str = "audit-run/artifacts",
+    artifacts_root: str = f"{DEFAULT_WORKSPACE}/artifacts",
 ) -> dict[str, Any]:
     """Return structural graph edges touching a document/page/block node."""
     root = _resolve_artifacts_root(artifacts_root)

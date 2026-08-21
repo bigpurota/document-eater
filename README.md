@@ -113,14 +113,23 @@ cannot reliably drive the OpenCode/MCP agent loop.
 For example:
 
 ```text
-~/Documents/PrivateDocuments/project-1/    # source documents
-~/Documents/DocumentAudits/project-1/      # generated audit data
-~/Documents/document-eater/                # application code and local models
+~/Documents/PrivateDocuments/project-1/                 # source documents
+~/Documents/PrivateDocuments/project-1/.document-eater-workspace/ # local RAG and reports
+~/Documents/document-eater/                             # application code and local models
 ```
 
 Directories on an encrypted external SSD work as well, for example
 `/Volumes/PrivateSSD/Documents/project-1`. Terminal and OpenCode must have permission
 to access the selected folders under **System Settings → Privacy & Security**.
+
+The hidden `.document-eater-workspace` directory is created automatically. It contains
+the index, extracted text, graph, and reports, but is excluded from source discovery.
+The same protection also recognizes older `audit-run` directories by their
+`run-manifest.json`, so generated CSV/Markdown files cannot be ingested back into the
+next audit. You may instead pass an absolute output directory elsewhere on the disk.
+Never use the source directory itself as the output directory.
+The BGE model cache does not move with the documents: the installed MCP configuration
+points it back to `<application>/models/retrieval` with an absolute path.
 
 ### 6. Start OpenCode and run the first audit
 
@@ -141,25 +150,28 @@ Confirm that the selected model is
 `local-docs/models/Qwen3.8-27B-4bit`, then send:
 
 ```text
-Use the document-eater tools to audit every supported document in the current workspace (.).
-Store generated artifacts under ./audit-run.
-
-Use local Qwen verification. Extract requirements, obligations, deadlines,
-required documents, exceptions, and conflicting clauses. For every result use
-PASS, PARTIAL, FAIL, UNKNOWN, CONFLICT, or NOT_APPLICABLE. Never convert missing
-evidence into FAIL. Show FAIL, CONFLICT, and UNKNOWN first and cite exact source
-documents and pages. Return the absolute report path when finished.
+Audit every supported document in this folder with local Qwen. Extract requirements,
+obligations, deadlines, required documents, exceptions, and conflicting clauses.
+Show FAIL, CONFLICT, and UNKNOWN first and cite exact source locations.
 ```
 
-OpenCode should call `audit_documents`, wait for OCR/indexing/retrieval/model
-verification, and return a summary plus an absolute `report_path`.
+The installed `document-auditor` is the default primary agent. It calls
+`audit_documents` once, remains silent while OCR/indexing/retrieval/model verification
+runs, and returns one final summary plus the absolute `report_path`. It only interrupts
+with a message when a real error requires action. OpenCode may still render its own
+tool activity indicator; that UI is not an extra model response.
+
+Repeating the same request does not repeat OCR, embeddings, or Qwen verification.
+The corpus fingerprint, audit settings, and model are compared with the completed
+manifest; unchanged work is reused. Changed source files rebuild automatically. Use
+`force_rebuild=true` only when you intentionally want to discard that cache.
 
 ### 7. Inspect and continue working with the corpus
 
 Open the path returned by the agent, normally:
 
 ```bash
-open ~/Documents/PrivateDocuments/project-1/audit-run/report.html
+open ~/Documents/PrivateDocuments/project-1/.document-eater-workspace/report.html
 ```
 
 The output directory contains:
@@ -316,6 +328,7 @@ configuration installed by Homebrew. During bootstrap, an absolute-path copy is 
 that copy through `OPENCODE_CONFIG`. It:
 
 - selects the local MLX Qwen endpoint as the OpenCode model;
+- selects the quiet, bounded `document-auditor` primary agent;
 - starts `document-eater-mcp` over stdio;
 - exposes `audit_documents`, `prepare_corpus`, `search_corpus`,
   `list_audit_items`, `get_audit_summary`, `read_document_page`, and
@@ -325,6 +338,11 @@ The generated MCP command selects the application environment with `uv --project
 while leaving MCP `cwd` as the OpenCode workspace. This is what allows code and model
 files to stay under `~/Documents/document-eater` while OpenCode is launched from any
 unrelated document folder.
+
+The agent denies every non-document tool, including shell, file edits, web access, and
+tools inherited from unrelated global MCP configurations. Only `document-eater_*`
+tools are allowed, and identical tool calls are not retried. This both protects private
+documents and avoids wasting the 8K local context on progress chatter or loops.
 
 Do not switch OpenCode to a cloud model for this task: MCP returns extracted document
 text to the controlling model. A cloud OpenCode model therefore breaks the local-only

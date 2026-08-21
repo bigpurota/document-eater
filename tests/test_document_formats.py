@@ -134,6 +134,51 @@ def test_mixed_word_excel_and_text_corpus_runs_end_to_end(tmp_path):
     assert (run / "report.html").is_file()
 
 
+def test_generated_workspaces_are_never_rediscovered_as_source_documents(tmp_path):
+    source = tmp_path / "case"
+    source.mkdir()
+    original = source / "requirements.txt"
+    original.write_text("The supplier must submit the final report.", encoding="utf-8")
+    current_workspace = source / ".document-eater-workspace"
+    current_workspace.mkdir()
+    (current_workspace / ".document-eater-workspace").write_text("generated\n")
+    (current_workspace / "requirements.csv").write_text("generated,result\n")
+    legacy_workspace = source / "audit-run"
+    legacy_workspace.mkdir()
+    (legacy_workspace / "run-manifest.json").write_text("{}")
+    (legacy_workspace / "requirements.csv").write_text("old,result\n")
+
+    assert discover_documents(source) == [original.resolve()]
+
+
+def test_unchanged_nested_workspace_reuses_the_completed_audit(tmp_path):
+    source = tmp_path / "case"
+    source.mkdir()
+    (source / "requirements.txt").write_text(
+        "The supplier must submit the final report.", encoding="utf-8"
+    )
+    workspace = source / ".document-eater-workspace"
+
+    first = audit_corpus(source, workspace, retrieval_mode="lexical")
+    first_manifest = (workspace / "run-manifest.json").read_text(encoding="utf-8")
+    second = audit_corpus(source, workspace, retrieval_mode="lexical")
+
+    assert first.reused is False
+    assert second.reused is True
+    assert (workspace / "run-manifest.json").read_text(encoding="utf-8") == first_manifest
+    assert len(second.items) == 1
+
+    (source / "requirements.txt").write_text(
+        "The supplier must submit the final report.\nThe client shall approve it.",
+        encoding="utf-8",
+    )
+    changed = audit_corpus(source, workspace, retrieval_mode="lexical")
+
+    assert changed.reused is False
+    assert len(changed.items) == 2
+    assert (workspace / "run-manifest.json").read_text(encoding="utf-8") != first_manifest
+
+
 def test_xml_external_entity_is_rejected(tmp_path):
     source = tmp_path / "unsafe.xml"
     source.write_text(

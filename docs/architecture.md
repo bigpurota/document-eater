@@ -57,9 +57,22 @@ leaving MCP `cwd` equal to the OpenCode workspace. Therefore relative document a
 output paths resolve from the folder in which `document-opencode` was launched, not
 from this source repository.
 
+The default generated-data root is `.document-eater-workspace` below that document
+workspace. It is marked and explicitly excluded during recursive discovery, as is any
+older output containing `run-manifest.json`. A content fingerprint and audit-profile
+fingerprint allow completed indexes and reports to be reused without repeating OCR,
+embedding, or Qwen calls. The output may also be an unrelated absolute directory, but
+it cannot equal or contain the input directory.
+
+The generated MCP configuration sets `DOCUMENT_EATER_MODEL_CACHE` to the absolute
+application `models/retrieval` directory. Consequently changing MCP `cwd` to the
+document workspace does not duplicate model weights beside private documents.
+
 The generated configuration is stored separately from the user's ordinary global
 OpenCode configuration and selected through `OPENCODE_CONFIG`; bootstrap does not
-overwrite unrelated providers or preferences.
+overwrite unrelated providers or preferences. The default document agent denies all
+tools except the Document Eater MCP surface, so tools inherited from global OpenCode
+configuration are unavailable to it.
 
 ## Graph layers
 

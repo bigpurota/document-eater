@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pymupdf
+import pytest
 
 from document_eater.audit import audit_corpus, extract_requirements, verify_requirement
 from document_eater.index import SearchHit
@@ -116,3 +117,12 @@ def test_reusing_output_does_not_mix_old_corpus_into_new_audit(tmp_path):
 
     assert len(report.items) == 1
     assert report.items[0].requirement.filename == "second.pdf"
+
+
+def test_audit_rejects_workspace_that_contains_the_source(tmp_path):
+    source = tmp_path / "documents"
+    source.mkdir()
+    (source / "requirement.txt").write_text("The supplier must submit a report.", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="workspace must not be the input"):
+        audit_corpus(source, source, retrieval_mode="lexical")

@@ -12,6 +12,7 @@ dist/
 data/
 artifacts/
 audit-run/
+.document-eater-workspace/
 models/
 *.pdf
 *.doc
