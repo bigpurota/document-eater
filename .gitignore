@@ -14,4 +14,12 @@ artifacts/
 audit-run/
 models/
 *.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.xlsm
 *.gguf
+documents/
+private-documents/
+inputs/

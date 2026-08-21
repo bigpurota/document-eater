@@ -3,24 +3,45 @@
 ## Data flow
 
 ```text
-private PDF
-  -> page classifier
-     -> usable text layer: native extraction
-     -> scan / broken text: local OCR
+private source
+  -> format router
+     -> PDF: native page extraction or local OCR
+     -> DOCX: paragraphs, heading styles, table rows
+     -> XLSX: sheets, rows, cells, formulas and cached values
+     -> Markdown/XML/CSV/TXT: structure-aware native extraction
   -> provenance-preserving blocks
   -> deterministic structural graph
   -> local BM25 + BGE-M3 dense + BGE-M3 learned-sparse candidates
   -> reciprocal-rank fusion
   -> local bge-reranker-v2-m3 on the top candidate pool
-  -> evidence budget with page/block citations
+  -> evidence budget with page/paragraph/table/sheet/cell/path/line citations
   -> Qwen/Qwen3.8-27B MLX 4-bit primary (local M3 Max, 36 GB)
      -> optional SSH-tunnelled Vast server when policy permits
      -> optional manual OBLITERATUS fallback on explicit policy refusal
   -> answer + cited evidence + run manifest
 ```
 
-No full PDF needs to cross the LLM boundary. A future optional vision path is a
-separate privacy decision because it transmits rendered page images.
+No complete source file needs to cross the LLM boundary. Only retrieved text blocks
+are passed to the controlling model.
+
+## Multimodal extension boundary
+
+Images and audio belong behind the same `ingest_document` boundary but require
+separate local models and evidence types:
+
+```text
+PNG/JPEG -> OCR blocks + local vision captions/objects -> text and image vectors
+audio    -> local ASR segments + speaker labels        -> text vectors
+                                                        + timestamp graph edges
+```
+
+The first multimodal implementation must keep pixel boxes or time ranges on every
+derived block, store the extractor/model revision in the manifest, and evaluate OCR,
+caption, and transcription evidence separately. The current Qwen3.8 27B profile is
+text-only; adding image tensors to its prompt is not a supported shortcut. A vision
+or audio adapter must be optional so the 36 GB laptop can unload it before Qwen and
+the BGE reranker are started. Sending rendered pages, images, or recordings to Vast
+is a separate privacy decision from sending selected text blocks.
 
 The fallback is never triggered by phrases such as "insufficient evidence" or by a
 failed citation check. Automatic refusal classification is disabled until a held-out
@@ -44,8 +65,9 @@ overwrite unrelated providers or preferences.
 
 The graph is deliberately split into evidence levels:
 
-1. **Structural, deterministic (implemented):** document contains pages, pages
-   contain blocks, blocks follow one another, body blocks belong to headings.
+1. **Structural, deterministic (implemented):** documents contain logical units
+   (PDF pages, Excel sheets, or a Word/text document); units contain blocks, blocks
+   follow one another, and body blocks belong to headings.
 2. **Explicit references (next):** numbered cross-references, footnotes, table and
    figure references resolved by parser rules.
 3. **Semantic dependencies (later):** Qwen proposes typed edges such as

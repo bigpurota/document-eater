@@ -19,6 +19,8 @@ class Chunk:
     heading: str
     text: str
     block_ids: list[str]
+    location_start: str = ""
+    location_end: str = ""
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,21 @@ class SearchHit:
     text: str
     block_ids: list[str]
     score: float
+    location_start: str = ""
+    location_end: str = ""
     retrieval_scores: dict[str, float] = field(default_factory=dict)
+
+
+def format_hit_location(hit: SearchHit) -> str:
+    if hit.location_start:
+        location = hit.location_start
+        if hit.location_end and hit.location_end != hit.location_start:
+            location += f"–{hit.location_end}"
+        return f"{hit.chunk_id} {location}"
+    location = f"{hit.chunk_id} p.{hit.page_start}"
+    if hit.page_end != hit.page_start:
+        location += f"-{hit.page_end}"
+    return location
 
 
 def _connect(database: str | Path) -> sqlite3.Connection:
@@ -54,7 +70,9 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             page_end INTEGER NOT NULL,
             heading TEXT NOT NULL,
             text TEXT NOT NULL,
-            block_ids TEXT NOT NULL
+            block_ids TEXT NOT NULL,
+            location_start TEXT NOT NULL DEFAULT '',
+            location_end TEXT NOT NULL DEFAULT ''
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
             chunk_id UNINDEXED,
@@ -69,6 +87,11 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         );
         """
     )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(chunks)")}
+    if "location_start" not in columns:
+        connection.execute("ALTER TABLE chunks ADD COLUMN location_start TEXT NOT NULL DEFAULT ''")
+    if "location_end" not in columns:
+        connection.execute("ALTER TABLE chunks ADD COLUMN location_end TEXT NOT NULL DEFAULT ''")
 
 
 def _chunks_from_document(document: dict, max_chars: int = 1800) -> Iterable[Chunk]:
@@ -91,13 +114,19 @@ def _chunks_from_document(document: dict, max_chars: int = 1800) -> Iterable[Chu
             heading=heading,
             text="\n\n".join(block["text"] for block in pending),
             block_ids=[block["id"] for block in pending],
+            location_start=pending[0]["_location"],
+            location_end=pending[-1]["_location"],
         )
         pending = []
         length = 0
         return result
 
     for page in document["pages"]:
-        for block in page["blocks"]:
+        for raw_block in page["blocks"]:
+            block = dict(raw_block)
+            block["_location"] = str(
+                block.get("attrs", {}).get("location") or page.get("label") or f"p.{page['number']}"
+            )
             if block.get("role") == "heading":
                 ready = flush()
                 if ready:
@@ -133,6 +162,9 @@ def index_artifacts(
         if reset:
             connection.executescript(
                 """
+                DROP TABLE IF EXISTS learned_sparse_embeddings;
+                DROP TABLE IF EXISTS dense_embeddings;
+                DROP TABLE IF EXISTS retrieval_metadata;
                 DROP TABLE IF EXISTS chunks_fts;
                 DROP TABLE IF EXISTS chunks;
                 DROP TABLE IF EXISTS indexed_documents;
@@ -149,7 +181,10 @@ def index_artifacts(
             connection.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
             for chunk in _chunks_from_document(document, max_chars=max_chars):
                 connection.execute(
-                    "INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    """INSERT INTO chunks(
+                        id, document_id, page_start, page_end, heading, text, block_ids,
+                        location_start, location_end
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         chunk.id,
                         chunk.document_id,
@@ -158,6 +193,8 @@ def index_artifacts(
                         chunk.heading,
                         chunk.text,
                         json.dumps(chunk.block_ids),
+                        chunk.location_start,
+                        chunk.location_end,
                     ),
                 )
                 connection.execute(
@@ -204,6 +241,8 @@ def search(database: str | Path, query: str, *, limit: int = 10) -> list[SearchH
             text=row["text"],
             block_ids=json.loads(row["block_ids"]),
             score=-float(row["rank"]),
+            location_start=row["location_start"],
+            location_end=row["location_end"],
             retrieval_scores={"bm25": -float(row["rank"])},
         )
         for row in rows
@@ -224,6 +263,8 @@ def list_chunks(database: str | Path) -> list[Chunk]:
             heading=row["heading"],
             text=row["text"],
             block_ids=json.loads(row["block_ids"]),
+            location_start=row["location_start"],
+            location_end=row["location_end"],
         )
         for row in rows
     ]

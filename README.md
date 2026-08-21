@@ -1,10 +1,10 @@
 # Document Eater
 
-Local-first pipeline for private documents:
+Local-first pipeline for private PDF, Word, Excel, Markdown, XML, CSV, and text documents:
 
-1. extract the original PDF text layer when it is usable;
-2. OCR only pages that do not contain enough usable text;
-3. preserve page and bounding-box provenance;
+1. route each file to a format-aware local parser;
+2. use the original PDF text layer when usable and OCR only weak/scanned pages;
+3. preserve page, paragraph, table, sheet, row, cell, XML-path, and line provenance;
 4. build a deterministic document graph;
 5. retrieve locally and send only selected evidence to a Qwen endpoint.
 
@@ -17,7 +17,7 @@ learned-sparse, fusion, and reranking can be evaluated independently.
 
 This is the supported path for an **Apple M3 Max with 36 GB unified memory**. Keep at
 least 40 GiB free; 50 GiB or more is recommended for the Python environment, Qwen,
-the retrieval models, and working artifacts. Source PDFs may live anywhere on the
+the retrieval models, and working artifacts. Source documents may live anywhere on the
 Mac and are never required to be inside this repository.
 
 ### 1. Prepare the Mac and clone the private repository
@@ -113,7 +113,7 @@ cannot reliably drive the OpenCode/MCP agent loop.
 For example:
 
 ```text
-~/Documents/PrivateDocuments/project-1/    # source PDFs
+~/Documents/PrivateDocuments/project-1/    # source documents
 ~/Documents/DocumentAudits/project-1/      # generated audit data
 ~/Documents/document-eater/                # application code and local models
 ```
@@ -124,7 +124,7 @@ to access the selected folders under **System Settings → Privacy & Security**.
 
 ### 6. Start OpenCode and run the first audit
 
-Change into the folder that contains the PDFs and launch the installed document
+Change into the folder that contains the documents and launch the installed document
 profile there:
 
 ```bash
@@ -141,7 +141,7 @@ Confirm that the selected model is
 `local-docs/models/Qwen3.8-27B-4bit`, then send:
 
 ```text
-Use the document-eater tools to audit every PDF in the current workspace (.).
+Use the document-eater tools to audit every supported document in the current workspace (.).
 Store generated artifacts under ./audit-run.
 
 Use local Qwen verification. Extract requirements, obligations, deadlines,
@@ -227,7 +227,7 @@ directories outside the repository are not touched.
 | MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
 | `document-opencode` is not found | Rerun the bootstrap; it installs launchers into the Homebrew `bin` directory. |
 | OpenCode cannot see document tools | Rerun the bootstrap, then start with `document-opencode` instead of plain `opencode`. |
-| macOS denies access to PDFs or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
+| macOS denies access to documents or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
 | Memory pressure becomes high | Close other large applications, restart the MLX server, and keep the configured 8k context/4 GB prompt-cache limits. |
 | Report contains only `UNKNOWN` | Confirm that model verification was requested; otherwise this is the intentional candidate-only behavior. |
 
@@ -237,12 +237,12 @@ agent.
 
 ## Privacy boundary
 
-- Source PDFs stay at the path you choose. Extracted artifacts, embeddings, and graph
+- Source documents stay at the path you choose. Extracted artifacts, embeddings, and graph
   data stay in the selected local output directory or the ignored `data/`,
   `artifacts/`, and `models/` defaults.
 - The LLM adapter accepts loopback endpoints. The primary MLX server is local; an
   optional remote server must be reached through an SSH tunnel and receives only
-  retrieved evidence blocks rather than entire PDFs.
+  retrieved evidence blocks rather than entire documents.
 - A Vast.ai instance is still a third-party processor. Use it only when the data
   owner's policy permits external processing. Encryption in transit does not make
   a third party equivalent to local execution.
@@ -279,7 +279,7 @@ Use the fallback only for an explicit policy refusal. Do not retry merely becaus
 the primary says the retrieved evidence is insufficient, cannot support a claim, or
 contains conflicting facts; those are desirable document-QA outcomes.
 
-PyMuPDF is used by the ingestion MVP and is AGPL/commercial dual-licensed. Internal
+PyMuPDF is used by the PDF ingestion adapter and is AGPL/commercial dual-licensed. Internal
 use must be checked against the data owner's software policy; before proprietary
 distribution, buy an appropriate license or replace this adapter with a permissive
 PDF backend.
@@ -337,7 +337,7 @@ explicitly. See the current [OpenCode MCP documentation](https://opencode.ai/doc
 
 ```bash
 uv run --no-sync document-eater inspect path/to/document.pdf
-uv run --no-sync document-eater ingest path/to/document.pdf --output artifacts
+uv run --no-sync document-eater ingest path/to/document.docx --output artifacts
 uv run --no-sync document-eater index artifacts --quality --database data/index.sqlite3
 uv run --no-sync document-eater search "условия расторжения" --database data/index.sqlite3
 uv run --no-sync document-eater ask "каков срок уведомления?" --database data/index.sqlite3
@@ -345,22 +345,41 @@ uv run --no-sync document-eater ask "..." --profile abliterated --database data/
 uv run --no-sync python -m pytest
 ```
 
-`inspect` performs no OCR and reports which pages would use the native text layer or
-OCR. `ingest` defaults to `--ocr auto --languages rus+eng` and writes:
+`inspect` is PDF-specific: it performs no OCR and reports which pages would use the
+native text layer or OCR. `ingest` accepts `.pdf`, `.docx`, `.xlsx`, `.xml`, `.csv`,
+`.md`, and `.txt`; the OCR flags affect only PDFs. It writes:
 
-- `<document-id>/document.json` — pages and blocks with provenance;
+- `<document-id>/document.json` — normalized logical units and blocks with provenance;
 - `<document-id>/graph.json` — `contains`, `next`, and section membership edges;
 - `<document-id>/manifest.json` — source hash and pipeline settings.
 
-The source PDF is not copied into the artifact directory.
+The source document is not copied into the artifact directory.
+
+### Supported source formats
+
+| Format | Extraction and provenance |
+|---|---|
+| PDF | native text or local Tesseract OCR; page and bounding box |
+| DOCX | paragraphs, heading styles, and table rows; paragraph/table-row locator |
+| XLSX | worksheets, rows, cells, number formats, formulas, and cached values when present |
+| XML | entity-safe structural traversal; XML element path and attributes |
+| CSV | detected delimiter/header; row, column label, and raw value |
+| Markdown | heading-aware blocks with original line ranges |
+| TXT | UTF-8/UTF-16/Windows-1251 text; original line ranges |
+
+Excel formulas are preserved as evidence but never executed. Macro-enabled workbooks,
+legacy `.xls`, Word pagination, embedded charts/images, and handwritten content are
+not interpreted in this version. DOCX has no reliable page number without rendering,
+so reports cite the exact paragraph or table row instead of inventing a page.
 
 ## What this build does and does not prove
 
-Implemented and tested: page-level native/OCR routing, provenance, structural graph,
+Implemented and tested: mixed PDF/DOCX/XLSX/XML/CSV/Markdown/TXT ingestion, page-level
+native/OCR routing, format-aware provenance, structural graph,
 BM25+dense RRF, BGE-M3 dense+sparse generation on Apple Metal, multilingual BGE
 reranking, rule-based requirement candidates, conservative Qwen JSON verdict
 validation, HTML/CSV/JSON reports, and an MCP stdio handshake. A quality-RAG
-end-to-end synthetic English PDF run found the expected requirement and evidence;
+end-to-end mixed Word/Excel/text runs found the expected requirements and evidence;
 without an LLM it correctly retained `UNKNOWN`. The automated suite does not yet
 establish recall on your documents, full Qwen tool use, or M3 Max throughput and peak
 memory. Run the included MLX tool-call smoke test on the target Mac before relying on

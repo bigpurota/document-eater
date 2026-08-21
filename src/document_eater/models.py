@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 TextSource = Literal["native", "ocr"]
+DocumentFormat = Literal["pdf", "docx", "xlsx", "xml", "csv", "txt", "md"]
+UnitKind = Literal["page", "document", "sheet"]
 
 
 @dataclass(frozen=True)
@@ -20,10 +22,11 @@ class Block:
     page: int
     order: int
     text: str
-    bbox: BBox
+    bbox: BBox | None
     source: TextSource
     font_size: float | None = None
     role: Literal["heading", "body"] = "body"
+    attrs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,9 @@ class Page:
     source: TextSource
     native_char_count: int
     blocks: list[Block] = field(default_factory=list)
+    kind: UnitKind = "page"
+    label: str | None = None
+    attrs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,7 @@ class Document:
     filename: str
     sha256: str
     pages: list[Page]
+    format: DocumentFormat = "pdf"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

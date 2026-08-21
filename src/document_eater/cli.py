@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .audit import audit_corpus
 from .index import index_artifacts, search
+from .ingest import ingest_document
 from .llm import (
     ABLITERATED_GENERATION,
     ABLITERATED_MODEL,
@@ -16,7 +17,7 @@ from .llm import (
     QwenClient,
     answer_question,
 )
-from .pdf import ingest_pdf, inspect_pdf
+from .pdf import inspect_pdf
 from .rag import (
     DEFAULT_EMBEDDING_MODEL,
     BgeM3Encoder,
@@ -35,8 +36,8 @@ def _parser() -> argparse.ArgumentParser:
     inspect_cmd.add_argument("pdf", type=Path)
     inspect_cmd.add_argument("--min-native-chars", type=int, default=40)
 
-    ingest_cmd = commands.add_parser("ingest", help="extract a PDF and build its graph")
-    ingest_cmd.add_argument("pdf", type=Path)
+    ingest_cmd = commands.add_parser("ingest", help="extract a document and build its graph")
+    ingest_cmd.add_argument("document", type=Path)
     ingest_cmd.add_argument("--output", type=Path, default=Path("artifacts"))
     ingest_cmd.add_argument("--ocr", choices=("auto", "never", "always"), default="auto")
     ingest_cmd.add_argument("--languages", default="rus+eng")
@@ -73,9 +74,9 @@ def _parser() -> argparse.ArgumentParser:
     ask_cmd.add_argument("--embedding-cache", type=Path, default=Path("models/retrieval"))
 
     audit_cmd = commands.add_parser(
-        "audit", help="ingest a PDF folder and build a requirement compliance report"
+        "audit", help="ingest a document folder and build a requirement compliance report"
     )
-    audit_cmd.add_argument("input", type=Path, help="PDF file or directory")
+    audit_cmd.add_argument("input", type=Path, help="supported document or directory")
     audit_cmd.add_argument("--output", type=Path, default=Path("audit-run"))
     audit_cmd.add_argument("--use-llm", action="store_true", help="verify with local Qwen")
     audit_cmd.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
@@ -186,8 +187,8 @@ def main() -> None:
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    destination = ingest_pdf(
-        args.pdf,
+    destination = ingest_document(
+        args.document,
         args.output,
         ocr=args.ocr,
         languages=args.languages,

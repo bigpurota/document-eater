@@ -5,13 +5,16 @@ build-backend = "uv_build"
 [project]
 name = "document-eater"
 version = "0.1.0"
-description = "Private, local-first PDF ingestion and document graph pipeline"
+description = "Private, local-first document ingestion, graph, and retrieval pipeline"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+  "defusedxml>=0.7,<1",
   "fastembed>=0.7,<1",
   "mcp>=2,<3",
+  "openpyxl>=3.1,<4",
   "pymupdf>=1.26,<2",
+  "python-docx>=1.2,<2",
 ]
 
 [project.scripts]

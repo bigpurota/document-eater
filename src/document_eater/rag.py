@@ -232,6 +232,8 @@ def _hit_from_chunk(chunk: Chunk, score: float, scores: dict[str, float]) -> Sea
         text=chunk.text,
         block_ids=chunk.block_ids,
         score=score,
+        location_start=chunk.location_start,
+        location_end=chunk.location_end,
         retrieval_scores=scores,
     )
 

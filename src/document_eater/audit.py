@@ -10,9 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from .index import SearchHit, index_artifacts, search
+from .index import SearchHit, format_hit_location, index_artifacts, search
+from .ingest import discover_documents, document_counts, ingest_document
 from .llm import QwenClient, build_evidence
-from .pdf import ingest_pdf
 from .rag import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_MODEL_CACHE,
@@ -76,6 +76,7 @@ class Requirement:
     filename: str
     source_path: str | None
     page: int
+    location: str
     block_id: str
     extraction: Literal["rule"] = "rule"
 
@@ -103,15 +104,6 @@ class AuditReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def discover_pdfs(path: str | Path) -> list[Path]:
-    source = Path(path).expanduser().resolve()
-    if source.is_file() and source.suffix.casefold() == ".pdf":
-        return [source]
-    if source.is_dir():
-        return sorted(p.resolve() for p in source.rglob("*.pdf") if p.is_file())
-    raise ValueError(f"Expected a PDF or directory containing PDFs, got: {source}")
 
 
 def _manifest_by_document(artifacts: Path) -> dict[str, dict[str, Any]]:
@@ -153,6 +145,11 @@ def extract_requirements(artifacts: str | Path) -> list[Requirement]:
                             filename=document["filename"],
                             source_path=manifest.get("source_path"),
                             page=int(page["number"]),
+                            location=str(
+                                block.get("attrs", {}).get("location")
+                                or page.get("label")
+                                or f"page {page['number']}"
+                            ),
                             block_id=block["id"],
                         )
                     )
@@ -168,10 +165,7 @@ def _query_for_requirement(text: str) -> str:
 
 
 def _source_label(hit: SearchHit) -> str:
-    label = f"{hit.chunk_id} p.{hit.page_start}"
-    if hit.page_end != hit.page_start:
-        label += f"-{hit.page_end}"
-    return label
+    return format_hit_location(hit)
 
 
 def find_evidence(
@@ -260,30 +254,51 @@ PASS requires direct evidence that every material part is fulfilled. PARTIAL req
 
 
 def _write_csv(report: AuditReport, path: Path) -> None:
+    def safe(value: Any) -> Any:
+        if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
-            ["id", "status", "requirement", "document", "page", "rationale", "citations"]
+            [
+                "id",
+                "status",
+                "requirement",
+                "document",
+                "location",
+                "page_or_unit",
+                "rationale",
+                "citations",
+            ]
         )
         for item in report.items:
             req = item.requirement
             writer.writerow(
                 [
-                    req.id,
-                    item.status,
-                    req.text,
-                    req.filename,
-                    req.page,
-                    item.rationale,
-                    "; ".join(item.used_citations),
+                    safe(value)
+                    for value in [
+                        req.id,
+                        item.status,
+                        req.text,
+                        req.filename,
+                        req.location,
+                        req.page,
+                        item.rationale,
+                        "; ".join(item.used_citations),
+                    ]
                 ]
             )
 
 
-def _pdf_link(requirement: Requirement) -> str:
+def _source_link(requirement: Requirement) -> str:
     if not requirement.source_path:
         return ""
-    return Path(requirement.source_path).as_uri() + f"#page={requirement.page}"
+    link = Path(requirement.source_path).as_uri()
+    if Path(requirement.source_path).suffix.casefold() == ".pdf":
+        link += f"#page={requirement.page}"
+    return link
 
 
 def _write_html(report: AuditReport, path: Path) -> None:
@@ -302,8 +317,8 @@ def _write_html(report: AuditReport, path: Path) -> None:
     rows = []
     for item in report.items:
         req = item.requirement
-        location = f"{html.escape(req.filename)}, стр. {req.page}"
-        link = _pdf_link(req)
+        location = f"{html.escape(req.filename)}, {html.escape(req.location)}"
+        link = _source_link(req)
         if link:
             location = f'<a href="{html.escape(link, quote=True)}">{location}</a>'
         evidence = "<br>".join(html.escape(c) for c in item.used_citations) or "—"
@@ -344,13 +359,23 @@ def audit_corpus(
     artifacts = run / "artifacts" / run_id
     database = run / "index.sqlite3"
     run.mkdir(parents=True, exist_ok=True)
-    pdfs = discover_pdfs(source)
-    if not pdfs:
-        raise ValueError(f"No PDF files found under: {source}")
-    notify(f"Найдено PDF: {len(pdfs)}")
-    for number, pdf in enumerate(pdfs, 1):
-        notify(f"[{number}/{len(pdfs)}] Извлечение: {pdf.name}")
-        ingest_pdf(pdf, artifacts, ocr=ocr, languages=languages, dpi=dpi)  # type: ignore[arg-type]
+    documents = discover_documents(source)
+    if not documents:
+        raise ValueError(f"No supported documents found under: {source}")
+    counts = document_counts(documents)
+    summary_counts = ", ".join(
+        f"{kind.upper()}: {count}" for kind, count in counts.items() if count
+    )
+    notify(f"Найдено документов: {len(documents)} ({summary_counts})")
+    for number, document in enumerate(documents, 1):
+        notify(f"[{number}/{len(documents)}] Извлечение: {document.name}")
+        ingest_document(
+            document,
+            artifacts,
+            ocr=ocr,  # type: ignore[arg-type]
+            languages=languages,
+            dpi=dpi,
+        )
     notify("Построение локального поискового индекса")
     index_artifacts(artifacts, database, reset=True)
     if retrieval_mode == "quality":
@@ -408,7 +433,9 @@ def audit_corpus(
         "schema_version": 1,
         "created_at": report.created_at,
         "input_path": str(source),
-        "pdf_count": len(pdfs),
+        "document_count": len(documents),
+        "document_counts": counts,
+        "pdf_count": counts["pdf"],
         "requirement_count": len(items),
         "verification_mode": report.verification_mode,
         "retrieval_mode": report.retrieval_mode,

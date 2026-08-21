@@ -29,7 +29,7 @@ from .rag import (
 mcp = MCPServer(
     "document-eater",
     title="Document Eater",
-    description="Private local PDF ingestion, retrieval, and requirement audit tools.",
+    description="Private local document ingestion, retrieval, and requirement audit tools.",
     instructions=(
         "Use these tools for private documents. Do not send returned document text to a "
         "non-local model unless the data owner explicitly permits it. UNKNOWN means that "
@@ -115,7 +115,7 @@ def audit_documents(
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_cache: str = "models/retrieval",
 ) -> dict[str, Any]:
-    """Audit one PDF or a directory: ingest, find requirements, retrieve evidence, write reports."""
+    """Audit a document or directory: ingest, find requirements, retrieve evidence, write reports."""
     _release_retrieval_memory()
     try:
         report = audit_corpus(
@@ -145,7 +145,7 @@ def prepare_corpus(
     retrieval_mode: str = "quality",
     embedding_cache: str = "models/retrieval",
 ) -> dict[str, Any]:
-    """OCR and index a private PDF corpus locally so the agent can search it afterward."""
+    """Extract and index a private document corpus locally for subsequent search."""
     _release_retrieval_memory()
     try:
         report = audit_corpus(
@@ -158,6 +158,7 @@ def prepare_corpus(
     finally:
         _release_retrieval_memory()
     return {
+        "document_workspace": str(Path(report.run_directory).resolve()),
         "pdf_workspace": str(Path(report.run_directory).resolve()),
         "database_path": str(Path(report.run_directory).resolve() / "index.sqlite3"),
         "retrieval_mode": report.retrieval_mode,
@@ -222,7 +223,7 @@ def read_document_page(
     page: int,
     artifacts_root: str = "audit-run/artifacts",
 ) -> dict[str, Any]:
-    """Open one extracted page by document ID with exact block IDs and bounding boxes."""
+    """Open an extracted page, Word document unit, or Excel sheet with provenance."""
     if page < 1:
         raise ValueError("page must be positive")
     root = _resolve_artifacts_root(artifacts_root)

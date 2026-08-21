@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from .index import SearchHit, search
+from .index import SearchHit, format_hit_location, search
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -43,9 +43,7 @@ def build_evidence(hits: list[SearchHit], max_chars: int = 12_000) -> tuple[str,
     citations: list[dict] = []
     used = 0
     for hit in hits:
-        label = f"{hit.chunk_id} p.{hit.page_start}"
-        if hit.page_end != hit.page_start:
-            label += f"-{hit.page_end}"
+        label = format_hit_location(hit)
         body = f"[SOURCE {label}]\n{hit.text}\n[/SOURCE]"
         if sections and used + len(body) > max_chars:
             break
@@ -56,6 +54,7 @@ def build_evidence(hits: list[SearchHit], max_chars: int = 12_000) -> tuple[str,
                 "chunk_id": hit.chunk_id,
                 "document_id": hit.document_id,
                 "pages": [hit.page_start, hit.page_end],
+                "locations": [hit.location_start, hit.location_end],
                 "block_ids": hit.block_ids,
                 "retrieval_score": hit.score,
             }
