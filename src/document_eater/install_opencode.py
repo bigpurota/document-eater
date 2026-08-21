@@ -15,7 +15,17 @@ def build_workspace_config(project_root: Path) -> dict[str, Any]:
     if not source.is_file():
         raise ValueError(f"opencode.json not found under project root: {root}")
     config = json.loads(source.read_text(encoding="utf-8"))
-    server = config["mcp"]["servers"]["document-eater"]
+    mcp = config.get("mcp")
+    if not isinstance(mcp, dict):
+        raise ValueError("opencode.json must contain an mcp object")
+
+    # OpenCode's supported config has MCP names directly below `mcp`. Accept the
+    # short-lived V2 template shape as input too so an older checkout can still be
+    # repaired by rerunning this installer.
+    servers = mcp.get("servers", mcp)
+    if not isinstance(servers, dict) or "document-eater" not in servers:
+        raise ValueError("opencode.json does not define the document-eater MCP server")
+    server = dict(servers["document-eater"])
     server["command"] = [
         "uv",
         "run",
@@ -28,6 +38,9 @@ def build_workspace_config(project_root: Path) -> dict[str, Any]:
     # makes '.', relative input paths, and relative audit outputs refer to the folder
     # from which document-opencode was launched, not the application source tree.
     server["cwd"] = "."
+    server["enabled"] = True
+    server.pop("codemode", None)
+    config["mcp"] = {"document-eater": server}
     return config
 
 

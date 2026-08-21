@@ -137,7 +137,8 @@ application path. The MCP process uses the current document folder as its workin
 directory, so `.` and relative output paths refer to this folder rather than the code
 repository.
 
-Confirm that the selected model is `local-docs/qwen-27b`, then send:
+Confirm that the selected model is
+`local-docs/models/Qwen3.8-27B-4bit`, then send:
 
 ```text
 Use the document-eater tools to audit every PDF in the current workspace (.).
@@ -309,8 +310,8 @@ data owner explicitly permits third-party processing.
 
 ## OpenCode integration details
 
-The checked-in `opencode.json` is the source template for the current OpenCode V2
-configuration. During bootstrap, an absolute-path copy is written to
+The checked-in `opencode.json` is the source template for the stable OpenCode
+configuration installed by Homebrew. During bootstrap, an absolute-path copy is written to
 `~/.config/opencode/document-eater.json`. The `document-opencode` launcher selects
 that copy through `OPENCODE_CONFIG`. It:
 
@@ -329,9 +330,8 @@ Do not switch OpenCode to a cloud model for this task: MCP returns extracted doc
 text to the controlling model. A cloud OpenCode model therefore breaks the local-only
 privacy boundary even though OCR and the index still run locally.
 
-OpenCode V2 and older releases use different config shapes. The included file targets
-V2; see the current [OpenCode MCP documentation](https://opencode.ai/v2/docs/mcp-servers)
-if your installed version rejects `mcp.servers`.
+The MCP entry follows the supported direct `mcp.document-eater` shape and is enabled
+explicitly. See the current [OpenCode MCP documentation](https://opencode.ai/docs/mcp-servers).
 
 ## Lower-level commands
 
