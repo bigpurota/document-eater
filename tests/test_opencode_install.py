@@ -16,8 +16,7 @@ def test_checked_in_template_uses_supported_opencode_shape():
     assert "provider" in config
     assert "providers" not in config
     assert config["model"] in {
-        f"local-docs/{model_id}"
-        for model_id in config["provider"]["local-docs"]["models"]
+        f"local-docs/{model_id}" for model_id in config["provider"]["local-docs"]["models"]
     }
     assert "servers" not in config["mcp"]
     server = config["mcp"]["document-eater"]
