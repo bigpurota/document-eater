@@ -8,9 +8,10 @@ Local-first pipeline for private PDF, Word, Excel, Markdown, XML, CSV, and text 
 4. build a deterministic document graph;
 5. retrieve locally and send only selected evidence to a Qwen endpoint.
 
-The implemented slice includes ingestion, the structural graph, a high-quality
-multilingual retrieval profile, an OpenCode MCP agent interface, and a localhost-only
-Qwen client. Retrieval keeps its component scores visible so BM25, BGE-M3 dense,
+The primary interface is a standalone terminal UI with no OpenCode dependency. The
+implemented slice includes ingestion, the structural graph, a high-quality multilingual
+retrieval profile, an optional OpenCode MCP interface, and a localhost-only Qwen client.
+Retrieval keeps its component scores visible so BM25, BGE-M3 dense,
 learned-sparse, fusion, and reranking can be evaluated independently.
 
 ## End-to-end: fresh M3 Max to first document audit
@@ -55,14 +56,15 @@ Control-click the file, choose **Open**, and confirm once.
 
 The installer is resumable and idempotent. It:
 
-- installs missing `uv`, Tesseract, Russian OCR data, and OpenCode through Homebrew;
+- installs missing `uv`, Tesseract, and Russian OCR data through Homebrew;
 - installs Python 3.12 and the locked project environment;
 - downloads the pinned Qwen3.8 27B MLX 4-bit checkpoint (~16.05 GB);
 - downloads pinned BGE-M3 and `bge-reranker-v2-m3` retrieval models;
 - prefetches the isolated `mlx-lm==0.31.3` runtime;
-- installs `document-tui`, `document-qwen`, `document-qwen-smoke`, and
-  `document-opencode` commands;
+- installs `document-tui`, `document-qwen`, and `document-qwen-smoke` commands;
 - runs the project test suite.
+
+OpenCode is not installed and is not started by the default bootstrap.
 
 It does not search for, read, copy, or upload private documents. A successful finish
 ends with `Bootstrap complete` and a passing test summary.
@@ -73,8 +75,7 @@ Optional installation checks:
 test -f models/Qwen3.8-27B-4bit/config.json && echo "Qwen model: OK"
 tesseract --list-langs | grep -E '^(eng|rus)$'
 uv run --no-sync python -m pytest
-opencode --version
-command -v document-tui document-qwen document-qwen-smoke document-opencode
+command -v document-tui document-qwen document-qwen-smoke
 ```
 
 ### 3. Start local Qwen
@@ -85,14 +86,16 @@ Run this from any directory and keep the first terminal open:
 document-qwen
 ```
 
-The server listens only on `127.0.0.1:8080`. Initial model loading can take a while.
+The server listens only on `127.0.0.1:8080`. Its launcher sets `UV_OFFLINE`,
+`HF_HUB_OFFLINE`, and `TRANSFORMERS_OFFLINE`, so a missing runtime or model causes a
+local error instead of a download. Initial model loading can take a while.
 After it starts, this request must succeed from a second terminal:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/v1/models
 ```
 
-### 4. Optionally verify OpenCode tool calling
+### 4. Optionally verify the local Qwen runtime
 
 In the second terminal, also from any directory:
 
@@ -100,15 +103,14 @@ In the second terminal, also from any directory:
 document-qwen-smoke
 ```
 
-This check is required only for the optional OpenCode agent. The lean TUI calls Qwen
-directly and does not ask the model to choose tools. A successful check prints:
+The lean TUI calls Qwen directly and does not ask the model to choose tools. This smoke
+test is optional; a successful check prints:
 
 ```text
 MLX tool-call smoke test PASSED
 ```
 
-A server that generates normal text but fails this test can still run the TUI, but
-cannot reliably drive the OpenCode/MCP agent loop.
+A server that generates normal text but fails the tool-call portion can still run the TUI.
 
 ### 5. Keep documents outside the code repository
 
@@ -131,8 +133,8 @@ The same protection also recognizes older `audit-run` directories by their
 `run-manifest.json`, so generated CSV/Markdown files cannot be ingested back into the
 next audit. You may instead pass an absolute output directory elsewhere on the disk.
 Never use the source directory itself as the output directory.
-The BGE model cache does not move with the documents: the installed MCP configuration
-points it back to `<application>/models/retrieval` with an absolute path.
+The BGE model cache does not move with the documents: the installed TUI launcher points
+it back to `<application>/models/retrieval` with an absolute path.
 
 ### 6. Start the lean TUI and run the first audit
 
@@ -146,7 +148,8 @@ document-tui
 
 The menu can prepare the corpus without Qwen, verify requirements with Qwen, answer a
 question through local hybrid RAG, open the HTML report, and change endpoint/model/RAG
-settings. It stores the index and reports in `.document-eater-workspace` and reuses them
+settings. The standard launcher accepts only local endpoints. It stores the index and
+reports in `.document-eater-workspace` and reuses them
 until the source documents or audit profile change.
 
 For an explicitly approved OpenAI-compatible serverless endpoint, set the key outside
@@ -154,7 +157,7 @@ shell history and opt in to sending selected evidence fragments off the Mac:
 
 ```bash
 export DOCUMENT_EATER_QWEN_API_KEY='YOUR_KEY'
-document-tui \
+uv run --project ~/Documents/document-eater --no-sync document-eater tui "$PWD" \
   --base-url 'https://YOUR_PROVIDER.example/v1' \
   --model 'Qwen/Qwen3.8-27B' \
   --allow-remote
@@ -169,9 +172,15 @@ errors, HTTP 429, and server-side 5xx responses are retried twice with backoff.
 
 #### Optional OpenCode shell
 
-OpenCode remains available for exploratory agent workflows:
+OpenCode remains available for exploratory agent workflows, but is intentionally not
+part of the private standalone installation. Install it explicitly:
 
 ```bash
+brew install anomalyco/tap/opencode
+cd ~/Documents/document-eater
+uv run --no-sync document-eater-install-opencode \
+  --project-root "$PWD" \
+  --bin-dir "$(brew --prefix)/bin"
 cd ~/Documents/PrivateDocuments/project-1
 document-opencode
 ```
@@ -249,7 +258,7 @@ verification. In that mode, unresolved verdicts deliberately remain `UNKNOWN`.
 
 ### Updating an installed copy
 
-Stop OpenCode and the MLX server, then run:
+Stop the TUI and MLX server, then run:
 
 ```bash
 cd ~/Documents/document-eater
@@ -257,13 +266,8 @@ git pull --ff-only
 zsh scripts/bootstrap-m3-max.sh
 ```
 
-This refreshes the absolute application path stored in the generated OpenCode profile
-and reinstalls the four launcher commands. Existing private documents and audit
-directories outside the repository are not touched.
-
-Start a new OpenCode session after updating. An already-open session still contains its
-old oversized tool results and cannot recover that context merely because the profile on
-disk changed.
+This reinstalls the three standalone launchers and refreshes the pinned local runtimes.
+Existing private documents and audit directories outside the repository are not touched.
 
 ### Troubleshooting
 
@@ -273,9 +277,8 @@ disk changed.
 | Port 8080 is unavailable | Stop the old model server with `Ctrl+C`; do not expose a replacement on `0.0.0.0`. |
 | `Local Qwen endpoint is unavailable` | Start `scripts/start-qwen-macos.sh` and verify `/v1/models`. |
 | MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
-| `document-opencode` is not found | Rerun the bootstrap; it installs launchers into the Homebrew `bin` directory. |
 | `document-tui` is not found | Rerun the bootstrap, then open a new Terminal window so the Homebrew `bin` directory is refreshed. |
-| Remote endpoint is refused | Pass `--allow-remote` only after the data owner approves sending retrieved evidence outside the Mac. |
+| Remote endpoint is refused | This is intentional in `document-tui`: its launcher is strict offline. Use the lower-level CLI with `--allow-remote` only after the data owner approves external processing. |
 | Serverless returns `401` | Export the key as `DOCUMENT_EATER_QWEN_API_KEY`; do not put it directly in the command or repository. |
 | OpenCode cannot see document tools | Rerun the bootstrap, then start with `document-opencode` instead of plain `opencode`. |
 | The agent repeats searches or page reads | Stop that session, update/bootstrap the project, then launch a fresh `document-opencode` session. The profile now paginates and caps every text-returning MCP tool. |
@@ -292,13 +295,22 @@ agent.
 - Source documents stay at the path you choose. Extracted artifacts, embeddings, and graph
   data stay in the selected local output directory or the ignored `data/`,
   `artifacts/`, and `models/` defaults.
-- The LLM adapter accepts loopback endpoints. The primary MLX server is local; an
-  optional remote server must be reached through an SSH tunnel and receives only
-  retrieved evidence blocks rather than entire documents.
+- `document-tui` is fail-closed offline by default. Its launcher disables `uv`, Hugging
+  Face, Transformers, and datasets network access, disables their telemetry flags, and
+  installs a Python socket guard that permits only loopback and Unix-domain sockets.
+  A missing package or model fails locally instead of being downloaded at runtime.
+- `document-qwen` uses the same offline environment and binds MLX only to
+  `127.0.0.1:8080`; its isolated Python runtime loads the same loopback-only socket
+  guard. The TUI sends document evidence only to that loopback endpoint.
+- The lower-level CLI retains an explicit `--allow-remote` escape hatch. In that mode,
+  questions and selected RAG evidence leave the Mac and are processed by the provider.
 - A Vast.ai instance is still a third-party processor. Use it only when the data
   owner's policy permits external processing. Encryption in transit does not make
   a third party equivalent to local execution.
-- No telemetry or hosted API is part of the ingestion path.
+- No telemetry or hosted API is part of the standalone ingestion/TUI path. For an
+  operating-system-level guarantee against every process on the Mac, additionally use
+  a firewall rule or disconnect the network; application code cannot police unrelated
+  macOS services.
 
 ## Hardware profiles
 
@@ -364,10 +376,10 @@ data owner explicitly permits third-party processing.
 
 ## OpenCode integration details
 
-The checked-in `opencode.json` is the source template for the stable OpenCode
-configuration installed by Homebrew. During bootstrap, an absolute-path copy is written to
-`~/.config/opencode/document-eater.json`. The `document-opencode` launcher selects
-that copy through `OPENCODE_CONFIG`. It:
+The checked-in `opencode.json` is the source template for the optional OpenCode
+configuration. When the explicit optional installer above is run, an absolute-path copy
+is written to `~/.config/opencode/document-eater.json`. The `document-opencode` launcher
+selects that copy through `OPENCODE_CONFIG`. It:
 
 - selects the local MLX Qwen endpoint as the OpenCode model;
 - selects the quiet, bounded `document-auditor` primary agent;

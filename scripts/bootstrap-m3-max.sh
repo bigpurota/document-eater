@@ -52,10 +52,6 @@ fi
 if ! brew list --versions tesseract-lang >/dev/null 2>&1; then
   brew install tesseract-lang
 fi
-if ! command -v opencode >/dev/null 2>&1; then
-  brew install anomalyco/tap/opencode
-fi
-
 print "[2/8] Installing Python 3.12 and the document pipeline"
 uv python install 3.12
 uv sync \
@@ -64,15 +60,16 @@ uv sync \
   --no-editable \
   --reinstall-package document-eater
 
-print "[3/8] Installing workspace-independent OpenCode launchers"
+print "[3/8] Installing standalone private launchers (OpenCode is not required)"
 BREW_PREFIX="$(brew --prefix)"
 if [[ -z "$BREW_PREFIX" || ! -d "$BREW_PREFIX/bin" ]]; then
   print -u2 "Could not resolve the Homebrew bin directory."
   exit 1
 fi
-uv run --no-sync document-eater-install-opencode \
+uv run --no-sync document-eater-install \
   --project-root "$PROJECT_ROOT" \
-  --bin-dir "$BREW_PREFIX/bin"
+  --bin-dir "$BREW_PREFIX/bin" \
+  --standalone-only
 
 export HF_HUB_DISABLE_TELEMETRY=1
 export DO_NOT_TRACK=1
@@ -114,5 +111,3 @@ print "Finally, open the folder containing the documents and start the lean TUI:
 print "  cd '/absolute/path/to/my/documents'"
 print "  document-tui"
 print
-print "OpenCode remains available as an optional advanced shell:"
-print "  document-opencode"

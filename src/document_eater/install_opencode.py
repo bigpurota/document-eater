@@ -7,6 +7,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from .privacy import STRICT_OFFLINE_ENVIRONMENT
+
 
 def build_workspace_config(project_root: Path) -> dict[str, Any]:
     """Convert the checked-in project config into a workspace-independent config."""
@@ -60,31 +62,20 @@ def install_workspace_launchers(
     *,
     config_dir: Path,
     bin_dir: Path,
+    include_opencode: bool = True,
 ) -> dict[str, str]:
     root = project_root.expanduser().resolve()
     resolved_config_dir = config_dir.expanduser().resolve()
     resolved_bin_dir = bin_dir.expanduser().resolve()
-    resolved_config_dir.mkdir(parents=True, exist_ok=True)
     resolved_bin_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = resolved_config_dir / "document-eater.json"
-    config_path.write_text(
-        json.dumps(build_workspace_config(root), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    config_path.chmod(0o600)
-
     launchers = {
-        "document-opencode": _launcher(
-            {"OPENCODE_CONFIG": str(config_path)},
-            ["opencode"],
-        ),
         "document-qwen": _launcher(
-            {},
+            STRICT_OFFLINE_ENVIRONMENT,
             ["zsh", str(root / "scripts" / "start-qwen-macos.sh")],
         ),
         "document-qwen-smoke": _launcher(
-            {},
+            STRICT_OFFLINE_ENVIRONMENT,
             [
                 "uv",
                 "run",
@@ -96,7 +87,10 @@ def install_workspace_launchers(
             ],
         ),
         "document-tui": _launcher(
-            {"DOCUMENT_EATER_MODEL_CACHE": str(root / "models" / "retrieval")},
+            {
+                **STRICT_OFFLINE_ENVIRONMENT,
+                "DOCUMENT_EATER_MODEL_CACHE": str(root / "models" / "retrieval"),
+            },
             [
                 "uv",
                 "run",
@@ -108,15 +102,27 @@ def install_workspace_launchers(
             ],
         ),
     }
+    installed: dict[str, str] = {}
+    if include_opencode:
+        resolved_config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = resolved_config_dir / "document-eater.json"
+        config_path.write_text(
+            json.dumps(build_workspace_config(root), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        config_path.chmod(0o600)
+        launchers["document-opencode"] = _launcher(
+            {"OPENCODE_CONFIG": str(config_path)},
+            ["opencode"],
+        )
+        installed["config"] = str(config_path)
     for name, content in launchers.items():
         path = resolved_bin_dir / name
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
 
-    return {
-        "config": str(config_path),
-        **{name: str(resolved_bin_dir / name) for name in launchers},
-    }
+    installed.update({name: str(resolved_bin_dir / name) for name in launchers})
+    return installed
 
 
 def _default_config_dir() -> Path:
@@ -127,16 +133,22 @@ def _default_config_dir() -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Install workspace-independent Document Eater launchers for OpenCode."
+        description="Install workspace-independent Document Eater launchers."
     )
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--config-dir", type=Path, default=_default_config_dir())
     parser.add_argument("--bin-dir", type=Path, required=True)
+    parser.add_argument(
+        "--standalone-only",
+        action="store_true",
+        help="install the private TUI/Qwen launchers without OpenCode",
+    )
     args = parser.parse_args()
     installed = install_workspace_launchers(
         args.project_root,
         config_dir=args.config_dir,
         bin_dir=args.bin_dir,
+        include_opencode=not args.standalone_only,
     )
     print(json.dumps(installed, ensure_ascii=False, indent=2))
 

@@ -21,6 +21,7 @@ from .llm import (
     answer_question,
 )
 from .pdf import inspect_pdf
+from .privacy import enable_strict_offline, strict_offline_requested
 from .rag import (
     DEFAULT_EMBEDDING_MODEL,
     BgeM3Encoder,
@@ -162,6 +163,10 @@ def main() -> None:
     if args.command == "tui":
         from .tui import TUISettings, run_tui
 
+        strict_offline = strict_offline_requested() or not args.allow_remote
+        if strict_offline:
+            enable_strict_offline()
+
         source = args.input.expanduser().resolve()
         default_workspace_root = source if source.is_dir() else source.parent
         workspace = (
@@ -180,6 +185,7 @@ def main() -> None:
                 embedding_model=args.embedding_model,
                 embedding_cache=args.embedding_cache.expanduser().resolve(),
                 allow_remote=args.allow_remote,
+                strict_offline=strict_offline,
                 api_key_env=args.api_key_env,
                 timeout_seconds=args.timeout,
                 color=not args.no_color,

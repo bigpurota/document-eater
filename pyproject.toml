@@ -21,6 +21,7 @@ dependencies = [
 document-eater = "document_eater.cli:main"
 document-eater-mcp = "document_eater.mcp_server:main"
 document-eater-install-opencode = "document_eater.install_opencode:main"
+document-eater-install = "document_eater.install_opencode:main"
 
 [project.optional-dependencies]
 quality = [

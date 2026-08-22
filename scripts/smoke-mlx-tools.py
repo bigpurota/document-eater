@@ -7,6 +7,11 @@ import json
 import sys
 import urllib.request
 
+from document_eater.privacy import enable_strict_offline, strict_offline_requested
+
+if strict_offline_requested():
+    enable_strict_offline()
+
 MODEL = "models/Qwen3.8-27B-4bit"
 URL = "http://127.0.0.1:8080/v1/chat/completions"
 

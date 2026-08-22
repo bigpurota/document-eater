@@ -22,6 +22,7 @@ from .llm import (
     QwenClient,
     answer_question,
 )
+from .privacy import enable_strict_offline
 from .rag import (
     DEFAULT_EMBEDDING_MODEL,
     BgeM3Encoder,
@@ -44,6 +45,7 @@ class TUISettings:
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     embedding_cache: Path = Path("models/retrieval")
     allow_remote: bool = False
+    strict_offline: bool = True
     api_key_env: str = "DOCUMENT_EATER_QWEN_API_KEY"
     timeout_seconds: int = 300
     color: bool = True
@@ -100,6 +102,8 @@ class DocumentTUI:
         self.terminal = terminal or Terminal(color=settings.color)
 
     def run(self) -> None:
+        if self.settings.strict_offline:
+            enable_strict_offline()
         self._validate_paths()
         while True:
             self._dashboard()
@@ -124,6 +128,8 @@ class DocumentTUI:
                 self._message(str(exc), error=True)
 
     def _validate_paths(self) -> None:
+        if self.settings.strict_offline and self.settings.remote:
+            raise ValueError("Строгий offline-режим запрещает внешний endpoint")
         source = self.settings.source.expanduser().resolve()
         workspace = self.settings.workspace.expanduser().resolve()
         if not source.exists():
@@ -146,6 +152,11 @@ class DocumentTUI:
         self.terminal.write(f"│ Документы : {self.settings.source}")
         self.terminal.write(f"│ Workspace : {self.settings.workspace}")
         self.terminal.write(f"│ Endpoint  : {self.settings.base_url} ({endpoint_kind})")
+        self.terminal.write(
+            "│ Network   : только loopback (строгий offline)"
+            if self.settings.strict_offline
+            else "│ Network   : внешний доступ явно разрешён"
+        )
         self.terminal.write(f"│ Model     : {self.settings.selected_model}")
         self.terminal.write(f"│ RAG       : {self.settings.retrieval}")
         self._write_cached_status()
@@ -332,6 +343,11 @@ class DocumentTUI:
         if parsed.username or parsed.password:
             raise ValueError("Не помещайте ключ в URL; используйте API key env")
         if is_remote_endpoint(value):
+            if self.settings.strict_offline:
+                raise ValueError(
+                    "Строгий offline-режим запрещает внешний endpoint. "
+                    "Перезапустите CLI с --allow-remote только после разрешения владельца данных."
+                )
             if parsed.scheme != "https":
                 raise ValueError("Внешний endpoint должен использовать HTTPS")
             confirmation = self.terminal.ask(

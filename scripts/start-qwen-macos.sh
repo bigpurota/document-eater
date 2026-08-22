@@ -5,6 +5,19 @@ SCRIPT_DIR="${0:A:h}"
 PROJECT_ROOT="${SCRIPT_DIR:h}"
 cd "$PROJECT_ROOT"
 
+# Runtime is deliberately fail-closed: uv/Transformers/Hugging Face may use only
+# artifacts downloaded by bootstrap, and the model server binds to loopback below.
+export DOCUMENT_EATER_STRICT_OFFLINE=1
+export UV_OFFLINE=1
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+export HF_HUB_DISABLE_TELEMETRY=1
+export DO_NOT_TRACK=1
+# mlx-lm runs in an isolated uvx environment. Loading this project through
+# PYTHONPATH makes sitecustomize install the same loopback-only socket guard there.
+export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
 MODEL_PATH="${1:-models/Qwen3.8-27B-4bit}"
 
 if [[ ! -f "$MODEL_PATH/config.json" ]]; then

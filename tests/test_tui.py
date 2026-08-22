@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
+
 from document_eater.cli import _parser
 from document_eater.tui import DocumentTUI, Terminal, TUISettings, is_remote_endpoint
 
@@ -19,6 +21,7 @@ def test_tui_starts_in_document_folder_and_exits(tmp_path):
     settings = TUISettings(
         source=tmp_path,
         workspace=tmp_path / ".document-eater-workspace",
+        strict_offline=False,
         color=False,
     )
 
@@ -34,6 +37,7 @@ def test_remote_endpoint_requires_explicit_tui_confirmation(tmp_path):
     settings = TUISettings(
         source=tmp_path,
         workspace=tmp_path / ".document-eater-workspace",
+        strict_offline=False,
     )
     terminal, output = _terminal(["https://inference.example.com/v1", "no"])
     app = DocumentTUI(settings, terminal)
@@ -74,6 +78,31 @@ def test_tui_cli_exposes_lean_remote_profile(tmp_path, monkeypatch):
     assert args.retrieval == "hybrid"
     assert args.embedding_cache == cache
     assert is_remote_endpoint(args.base_url) is True
+
+
+def test_strict_offline_tui_refuses_remote_endpoint(tmp_path):
+    settings = TUISettings(
+        source=tmp_path,
+        workspace=tmp_path / ".document-eater-workspace",
+        strict_offline=True,
+    )
+    terminal, _output = _terminal(["https://inference.example.com/v1"])
+
+    with pytest.raises(ValueError, match="offline"):
+        DocumentTUI(settings, terminal)._configure_endpoint()
+
+
+def test_strict_offline_tui_refuses_remote_endpoint_at_startup(tmp_path):
+    settings = TUISettings(
+        source=tmp_path,
+        workspace=tmp_path / ".document-eater-workspace",
+        base_url="https://inference.example.com/v1",
+        allow_remote=True,
+        strict_offline=True,
+    )
+
+    with pytest.raises(ValueError, match="offline"):
+        DocumentTUI(settings)._validate_paths()
 
 
 def test_tui_reads_cached_summary_without_document_text(tmp_path):

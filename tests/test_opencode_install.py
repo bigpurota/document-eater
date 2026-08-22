@@ -88,7 +88,32 @@ def test_workspace_launchers_use_application_project_but_document_cwd(tmp_path):
     tui_launcher = (bin_dir / "document-tui").read_text()
     assert "document-eater tui" in tui_launcher
     assert "export DOCUMENT_EATER_MODEL_CACHE=" in tui_launcher
+    assert "export DOCUMENT_EATER_STRICT_OFFLINE=1" in tui_launcher
+    assert "export UV_OFFLINE=1" in tui_launcher
+    assert "export HF_HUB_OFFLINE=1" in tui_launcher
+    assert "export TRANSFORMERS_OFFLINE=1" in tui_launcher
     assert str(project.resolve() / "models" / "retrieval") in tui_launcher
+
+
+def test_standalone_install_omits_opencode_and_enforces_offline(tmp_path):
+    project = tmp_path / "application"
+    project.mkdir()
+    bin_dir = tmp_path / "bin"
+
+    installed = install_workspace_launchers(
+        project,
+        config_dir=tmp_path / "unused-config",
+        bin_dir=bin_dir,
+        include_opencode=False,
+    )
+
+    assert set(installed) == {"document-qwen", "document-qwen-smoke", "document-tui"}
+    assert not (bin_dir / "document-opencode").exists()
+    assert not (tmp_path / "unused-config").exists()
+    for name in installed:
+        launcher = (bin_dir / name).read_text(encoding="utf-8")
+        assert "export DOCUMENT_EATER_STRICT_OFFLINE=1" in launcher
+        assert "export UV_OFFLINE=1" in launcher
 
 
 def test_workspace_config_migrates_short_lived_v2_mcp_shape(tmp_path):
