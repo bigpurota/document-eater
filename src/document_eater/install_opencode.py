@@ -95,6 +95,18 @@ def install_workspace_launchers(
                 str(root / "scripts" / "smoke-mlx-tools.py"),
             ],
         ),
+        "document-tui": _launcher(
+            {"DOCUMENT_EATER_MODEL_CACHE": str(root / "models" / "retrieval")},
+            [
+                "uv",
+                "run",
+                "--project",
+                str(root),
+                "--no-sync",
+                "document-eater",
+                "tui",
+            ],
+        ),
     }
     for name, content in launchers.items():
         path = resolved_bin_dir / name

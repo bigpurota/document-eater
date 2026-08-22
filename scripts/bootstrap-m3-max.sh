@@ -110,6 +110,9 @@ print
 print "Then verify tool calling in terminal 2:"
 print "  document-qwen-smoke"
 print
-print "Finally, open the folder containing the PDFs and start the document agent:"
+print "Finally, open the folder containing the documents and start the lean TUI:"
 print "  cd '/absolute/path/to/my/documents'"
+print "  document-tui"
+print
+print "OpenCode remains available as an optional advanced shell:"
 print "  document-opencode"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -27,6 +28,15 @@ ABLITERATED_GENERATION = {
     "repetition_penalty": 1.15,
     "chat_template_kwargs": {"enable_thinking": False},
     "max_tokens": 2048,
+}
+REMOTE_BASE_GENERATION = {
+    "temperature": 0.1,
+    "top_p": 0.8,
+    "max_tokens": 4096,
+}
+REMOTE_ABLITERATED_GENERATION = {
+    "temperature": 0.0,
+    "max_tokens": 4096,
 }
 
 
@@ -72,12 +82,19 @@ class QwenClient:
         *,
         timeout_seconds: int = 180,
         allow_nonlocal_endpoint: bool = False,
+        api_key: str | None = None,
+        max_retries: int = 2,
+        retry_backoff_seconds: float = 1.0,
         generation_options: dict[str, Any] | None = None,
         use_system_prompt: bool = True,
     ) -> None:
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("base_url must be an HTTP(S) URL")
+        if parsed.username or parsed.password:
+            raise ValueError("Do not put credentials in base_url; use api_key instead")
+        if parsed.hostname not in _LOOPBACK_HOSTS and parsed.scheme != "https":
+            raise ValueError("Non-loopback Qwen endpoints must use HTTPS")
         if parsed.hostname not in _LOOPBACK_HOSTS and not allow_nonlocal_endpoint:
             raise ValueError(
                 "Refusing a non-loopback LLM endpoint. Use an SSH tunnel to localhost, "
@@ -86,6 +103,9 @@ class QwenClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.api_key = api_key
+        self.max_retries = max(0, int(max_retries))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
         self.generation_options = generation_options or dict(BASE_GENERATION)
         self.use_system_prompt = use_system_prompt
 
@@ -97,21 +117,38 @@ class QwenClient:
             **self.generation_options,
         }
         payload = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                result = json.load(response)
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Local Qwen endpoint is unavailable: {exc}") from exc
+        result = self._request_json(request)
         try:
             return result["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"Unexpected Qwen response shape: {result!r}") from exc
+
+    def _request_json(self, request: urllib.request.Request) -> dict[str, Any]:
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    result = json.load(response)
+                if not isinstance(result, dict):
+                    raise RuntimeError("Qwen endpoint returned a non-object JSON response")
+                return result
+            except urllib.error.HTTPError as exc:
+                retryable = exc.code in {408, 409, 425, 429} or exc.code >= 500
+                if not retryable or attempt >= self.max_retries:
+                    raise RuntimeError(f"Qwen endpoint returned HTTP {exc.code}") from exc
+            except urllib.error.URLError as exc:
+                if attempt >= self.max_retries:
+                    raise RuntimeError(f"Qwen endpoint is unavailable: {exc}") from exc
+            time.sleep(self.retry_backoff_seconds * (2**attempt))
+        raise RuntimeError("Qwen endpoint retry loop ended unexpectedly")
 
 
 def answer_question(

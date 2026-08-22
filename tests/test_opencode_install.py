@@ -84,6 +84,11 @@ def test_workspace_launchers_use_application_project_but_document_cwd(tmp_path):
     assert (bin_dir / "document-opencode").stat().st_mode & 0o111
     assert (bin_dir / "document-qwen").stat().st_mode & 0o111
     assert (bin_dir / "document-qwen-smoke").stat().st_mode & 0o111
+    assert (bin_dir / "document-tui").stat().st_mode & 0o111
+    tui_launcher = (bin_dir / "document-tui").read_text()
+    assert "document-eater tui" in tui_launcher
+    assert "export DOCUMENT_EATER_MODEL_CACHE=" in tui_launcher
+    assert str(project.resolve() / "models" / "retrieval") in tui_launcher
 
 
 def test_workspace_config_migrates_short_lived_v2_mcp_shape(tmp_path):

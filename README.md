@@ -60,7 +60,8 @@ The installer is resumable and idempotent. It:
 - downloads the pinned Qwen3.8 27B MLX 4-bit checkpoint (~16.05 GB);
 - downloads pinned BGE-M3 and `bge-reranker-v2-m3` retrieval models;
 - prefetches the isolated `mlx-lm==0.31.3` runtime;
-- installs `document-qwen`, `document-qwen-smoke`, and `document-opencode` commands;
+- installs `document-tui`, `document-qwen`, `document-qwen-smoke`, and
+  `document-opencode` commands;
 - runs the project test suite.
 
 It does not search for, read, copy, or upload private documents. A successful finish
@@ -73,7 +74,7 @@ test -f models/Qwen3.8-27B-4bit/config.json && echo "Qwen model: OK"
 tesseract --list-langs | grep -E '^(eng|rus)$'
 uv run --no-sync python -m pytest
 opencode --version
-command -v document-qwen document-qwen-smoke document-opencode
+command -v document-tui document-qwen document-qwen-smoke document-opencode
 ```
 
 ### 3. Start local Qwen
@@ -91,7 +92,7 @@ After it starts, this request must succeed from a second terminal:
 curl -fsS http://127.0.0.1:8080/v1/models
 ```
 
-### 4. Verify agent tool calling
+### 4. Optionally verify OpenCode tool calling
 
 In the second terminal, also from any directory:
 
@@ -99,13 +100,14 @@ In the second terminal, also from any directory:
 document-qwen-smoke
 ```
 
-Continue only after it prints:
+This check is required only for the optional OpenCode agent. The lean TUI calls Qwen
+directly and does not ask the model to choose tools. A successful check prints:
 
 ```text
 MLX tool-call smoke test PASSED
 ```
 
-This is a required gate: a server that generates normal text but fails this test
+A server that generates normal text but fails this test can still run the TUI, but
 cannot reliably drive the OpenCode/MCP agent loop.
 
 ### 5. Keep documents outside the code repository
@@ -119,8 +121,9 @@ For example:
 ```
 
 Directories on an encrypted external SSD work as well, for example
-`/Volumes/PrivateSSD/Documents/project-1`. Terminal and OpenCode must have permission
-to access the selected folders under **System Settings → Privacy & Security**.
+`/Volumes/PrivateSSD/Documents/project-1`. Terminal, the TUI, and optional OpenCode must
+have permission to access the selected folders under **System Settings → Privacy &
+Security**.
 
 The hidden `.document-eater-workspace` directory is created automatically. It contains
 the index, extracted text, graph, and reports, but is excluded from source discovery.
@@ -131,29 +134,52 @@ Never use the source directory itself as the output directory.
 The BGE model cache does not move with the documents: the installed MCP configuration
 points it back to `<application>/models/retrieval` with an absolute path.
 
-### 6. Start OpenCode and run the first audit
+### 6. Start the lean TUI and run the first audit
 
-Change into the folder that contains the documents and launch the installed document
-profile there:
+The recommended interface is a deterministic terminal menu with no OpenCode session or
+model-controlled tool loop:
+
+```bash
+cd ~/Documents/PrivateDocuments/project-1
+document-tui
+```
+
+The menu can prepare the corpus without Qwen, verify requirements with Qwen, answer a
+question through local hybrid RAG, open the HTML report, and change endpoint/model/RAG
+settings. It stores the index and reports in `.document-eater-workspace` and reuses them
+until the source documents or audit profile change.
+
+For an explicitly approved OpenAI-compatible serverless endpoint, set the key outside
+shell history and opt in to sending selected evidence fragments off the Mac:
+
+```bash
+export DOCUMENT_EATER_QWEN_API_KEY='YOUR_KEY'
+document-tui \
+  --base-url 'https://YOUR_PROVIDER.example/v1' \
+  --model 'Qwen/Qwen3.8-27B' \
+  --allow-remote
+```
+
+OCR, extracted artifacts, the graph, and the retrieval index stay local. The external
+endpoint receives only selected evidence fragments and the related requirement or
+question, but those fragments can still contain confidential data. The API key is read
+from the environment and is never written into the workspace. Non-loopback endpoints
+must use HTTPS; credentials embedded in endpoint URLs are rejected. Transient network
+errors, HTTP 429, and server-side 5xx responses are retried twice with backoff.
+
+#### Optional OpenCode shell
+
+OpenCode remains available for exploratory agent workflows:
 
 ```bash
 cd ~/Documents/PrivateDocuments/project-1
 document-opencode
 ```
 
-`document-opencode` loads a generated OpenCode configuration containing the absolute
-application path. The MCP process uses the current document folder as its working
-directory, so `.` and relative output paths refer to this folder rather than the code
-repository.
-
-Confirm that the selected model is
-`local-docs/models/Qwen3.8-27B-4bit`, then send:
-
-```text
-Audit every supported document in this folder with local Qwen. Extract requirements,
-obligations, deadlines, required documents, exceptions, and conflicting clauses.
-Show FAIL, CONFLICT, and UNKNOWN first and cite exact source locations.
-```
+`document-opencode` loads a generated configuration containing the absolute application
+path while keeping the current document folder as MCP working directory. Confirm the
+selected model is `local-docs/models/Qwen3.8-27B-4bit`, then request an audit or ask
+follow-up questions.
 
 The installed `document-auditor` is the default primary agent. It calls
 `audit_documents` once, remains silent while OCR/indexing/retrieval/model verification
@@ -232,7 +258,7 @@ zsh scripts/bootstrap-m3-max.sh
 ```
 
 This refreshes the absolute application path stored in the generated OpenCode profile
-and reinstalls the three launcher commands. Existing private documents and audit
+and reinstalls the four launcher commands. Existing private documents and audit
 directories outside the repository are not touched.
 
 Start a new OpenCode session after updating. An already-open session still contains its
@@ -248,6 +274,9 @@ disk changed.
 | `Local Qwen endpoint is unavailable` | Start `scripts/start-qwen-macos.sh` and verify `/v1/models`. |
 | MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
 | `document-opencode` is not found | Rerun the bootstrap; it installs launchers into the Homebrew `bin` directory. |
+| `document-tui` is not found | Rerun the bootstrap, then open a new Terminal window so the Homebrew `bin` directory is refreshed. |
+| Remote endpoint is refused | Pass `--allow-remote` only after the data owner approves sending retrieved evidence outside the Mac. |
+| Serverless returns `401` | Export the key as `DOCUMENT_EATER_QWEN_API_KEY`; do not put it directly in the command or repository. |
 | OpenCode cannot see document tools | Rerun the bootstrap, then start with `document-opencode` instead of plain `opencode`. |
 | The agent repeats searches or page reads | Stop that session, update/bootstrap the project, then launch a fresh `document-opencode` session. The profile now paginates and caps every text-returning MCP tool. |
 | macOS denies access to documents or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
@@ -373,12 +402,15 @@ explicitly. See the current [OpenCode MCP documentation](https://opencode.ai/doc
 ## Lower-level commands
 
 ```bash
+document-tui /absolute/path/to/documents
 uv run --no-sync document-eater inspect path/to/document.pdf
 uv run --no-sync document-eater ingest path/to/document.docx --output artifacts
 uv run --no-sync document-eater index artifacts --quality --database data/index.sqlite3
 uv run --no-sync document-eater search "условия расторжения" --database data/index.sqlite3
 uv run --no-sync document-eater ask "каков срок уведомления?" --database data/index.sqlite3
 uv run --no-sync document-eater ask "..." --profile abliterated --database data/index.sqlite3
+DOCUMENT_EATER_QWEN_API_KEY='...' uv run --no-sync document-eater ask "..." \
+  --base-url https://provider.example/v1 --model Qwen/Qwen3.8-27B --allow-remote
 uv run --no-sync python -m pytest
 ```
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import shutil
+import urllib.error
 
 import pymupdf
 import pytest
@@ -93,6 +95,55 @@ def test_qwen_client_requires_local_or_tunnelled_endpoint():
         QwenClient("https://public.example.com/v1", "qwen")
     client = QwenClient("http://127.0.0.1:8080/v1", "qwen")
     assert client.base_url == "http://127.0.0.1:8080/v1"
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        QwenClient(
+            "http://inference.example.com/v1",
+            "qwen",
+            allow_nonlocal_endpoint=True,
+        )
+
+
+def test_qwen_client_remote_opt_in_sends_bearer_key(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        return io.BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = QwenClient(
+        "https://inference.example.com/v1",
+        "Qwen/Qwen3.8-27B",
+        allow_nonlocal_endpoint=True,
+        api_key="secret-token",
+        timeout_seconds=45,
+    )
+
+    assert client.chat([{"role": "user", "content": "test"}]) == "ok"
+    assert captured == {"authorization": "Bearer secret-token", "timeout": 45}
+
+
+def test_qwen_client_retries_serverless_rate_limit(monkeypatch):
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request.full_url, timeout))
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(request.full_url, 429, "busy", {}, None)
+        return io.BytesIO(b'{"choices":[{"message":{"content":"recovered"}}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    client = QwenClient(
+        "https://inference.example.com/v1",
+        "Qwen/Qwen3.8-27B",
+        allow_nonlocal_endpoint=True,
+        max_retries=2,
+    )
+
+    assert client.chat([{"role": "user", "content": "test"}]) == "recovered"
+    assert len(calls) == 2
 
 
 def test_base_and_abliterated_prompt_profiles_are_explicit(tmp_path):
