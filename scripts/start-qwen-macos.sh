@@ -14,7 +14,7 @@ if [[ ! -f "$MODEL_PATH/config.json" ]]; then
 fi
 
 # 4 GB caps the persistent prompt-cache pool. The OpenCode model declaration
-# separately limits individual requests to 8192 tokens.
+# separately limits individual requests to 12288 tokens.
 # Keep mlx-lm isolated from the document environment: mlx-lm 0.31 uses
 # Transformers 5, while the pinned FlagEmbedding reranker needs Transformers 4.
 exec uvx --from 'mlx-lm==0.31.3' mlx_lm.server \

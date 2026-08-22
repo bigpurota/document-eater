@@ -161,6 +161,12 @@ runs, and returns one final summary plus the absolute `report_path`. It only int
 with a message when a real error requires action. OpenCode may still render its own
 tool activity indicator; that UI is not an extra model response.
 
+Follow-up retrieval is deliberately context-bounded. Search returns at most six short
+snippets, audit items are paginated, page/unit reads use character windows, and graph
+neighbors are paginated with truncated node text. These limits do not reduce the local
+index or the generated report; they only prevent one MCP result from consuming the
+12K agent context. The agent has eight total steps and at most four follow-up tool calls.
+
 Repeating the same request does not repeat OCR, embeddings, or Qwen verification.
 The corpus fingerprint, audit settings, and model are compared with the completed
 manifest; unchanged work is reused. Changed source files rebuild automatically. Use
@@ -229,6 +235,10 @@ This refreshes the absolute application path stored in the generated OpenCode pr
 and reinstalls the three launcher commands. Existing private documents and audit
 directories outside the repository are not touched.
 
+Start a new OpenCode session after updating. An already-open session still contains its
+old oversized tool results and cannot recover that context merely because the profile on
+disk changed.
+
 ### Troubleshooting
 
 | Symptom | Action |
@@ -239,8 +249,9 @@ directories outside the repository are not touched.
 | MLX tool-call smoke test fails | Do not use OpenCode automation; keep the server log and checkpoint/runtime versions for diagnosis. |
 | `document-opencode` is not found | Rerun the bootstrap; it installs launchers into the Homebrew `bin` directory. |
 | OpenCode cannot see document tools | Rerun the bootstrap, then start with `document-opencode` instead of plain `opencode`. |
+| The agent repeats searches or page reads | Stop that session, update/bootstrap the project, then launch a fresh `document-opencode` session. The profile now paginates and caps every text-returning MCP tool. |
 | macOS denies access to documents or an external SSD | Grant Terminal/OpenCode access under Privacy & Security → Files and Folders. |
-| Memory pressure becomes high | Close other large applications, restart the MLX server, and keep the configured 8k context/4 GB prompt-cache limits. |
+| Memory pressure becomes high | Close other large applications and restart the MLX server. If pressure persists on the 36 GB Mac, temporarily restore the OpenCode model limit from 12k to 8k; keep the 4 GB prompt-cache cap. |
 | Report contains only `UNKNOWN` | Confirm that model verification was requested; otherwise this is the intentional candidate-only behavior. |
 
 If the MLX server or smoke test fails, do not automatically switch to a cloud model:
@@ -269,14 +280,16 @@ not an automatic replacement.
 
 | Profile | Quantization | Approx. weights | Intended use |
 |---|---:|---:|---|
-| M3 Max 36 GB primary | MLX 4-bit | 16.05 GB weights | local private inference; 8k initial context |
+| M3 Max 36 GB primary | MLX 4-bit | 16.05 GB weights | local private inference; 12k bounded context |
 | Vast fallback | base Q4_K_M | 16.46 GB file | 24 GB GPU, only when data policy permits |
 | Vast primary reference | official BF16 | ~56 GB | 80 GB GPU, evaluation/reference runs |
 | Vast manual fallback | OBLITERATUS Q4_K_M | 16.81 GB file | separate 24 GB profile, loaded only when requested |
 
 The published 262k context length is not the operating target for this laptop. RAG
-uses a small, explicit evidence budget; the initial local MLX profile starts at 8k
-context.
+uses a small, explicit evidence budget; the local MLX profile starts at 12k context.
+An experimental 16k limit is plausible on 36 GB because this hybrid model uses full
+attention in only 16 of 64 layers, but it remains opt-in until memory pressure and
+latency are measured on the target Mac with Qwen plus both retrieval models loaded.
 Community abliterated checkpoints are untrusted supply-chain inputs until hashes,
 lineage, license, and a small document QA evaluation are recorded.
 
@@ -309,7 +322,7 @@ selects the lighter `BM25 + multilingual-e5-large` profile; `--retrieval lexical
 is the BM25 control.
 
 The Qwen launcher binds only to `127.0.0.1`, disables thinking, and caps the
-persistent prompt-cache pool at 4 GB. OpenCode separately caps requests at 8192
+persistent prompt-cache pool at 4 GB. OpenCode separately caps requests at 12288
 tokens. `mlx-lm==0.31.3` runs in an isolated `uvx` environment because that runtime
 requires Transformers 5 while the local BGE reranker is deliberately pinned to
 Transformers 4.x.
@@ -334,6 +347,12 @@ that copy through `OPENCODE_CONFIG`. It:
   `list_audit_items`, `get_audit_summary`, `read_document_page`, and
   `graph_neighbors` directly to the model.
 
+The model sees compact views rather than whole machine artifacts: search defaults to
+four snippets (six maximum), audit lists default to three items, page/unit reads default
+to 4,000 characters, and graph queries default to twelve edges. The complete
+`audit.json`, `index.sqlite3`, extracted artifacts, and HTML report remain unchanged on
+disk and can be paged through when more evidence is genuinely needed.
+
 The generated MCP command selects the application environment with `uv --project`
 while leaving MCP `cwd` as the OpenCode workspace. This is what allows code and model
 files to stay under `~/Documents/document-eater` while OpenCode is launched from any
@@ -342,7 +361,7 @@ unrelated document folder.
 The agent denies every non-document tool, including shell, file edits, web access, and
 tools inherited from unrelated global MCP configurations. Only `document-eater_*`
 tools are allowed, and identical tool calls are not retried. This both protects private
-documents and avoids wasting the 8K local context on progress chatter or loops.
+documents and avoids wasting the 12K local context on progress chatter or loops.
 
 Do not switch OpenCode to a cloud model for this task: MCP returns extracted document
 text to the controlling model. A cloud OpenCode model therefore breaks the local-only

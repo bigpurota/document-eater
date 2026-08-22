@@ -25,11 +25,15 @@ def test_checked_in_template_uses_supported_opencode_shape():
     assert config["default_agent"] == "document-auditor"
     agent = config["agent"]["document-auditor"]
     assert agent["mode"] == "primary"
-    assert agent["steps"] == 12
+    assert agent["steps"] == 8
     assert "Never emit routine progress" in agent["prompt"]
     assert "Never repeat a tool call" in agent["prompt"]
     assert agent["permission"]["*"] == "deny"
     assert agent["permission"]["document_eater_*"] == "allow"
+    assert agent["tools"]["*"] is False
+    assert agent["tools"]["document_eater_*"] is True
+    model = config["provider"]["local-docs"]["models"]["models/Qwen3.8-27B-4bit"]
+    assert model["limit"] == {"context": 12_288, "output": 2_048}
 
 
 def test_workspace_launchers_use_application_project_but_document_cwd(tmp_path):
